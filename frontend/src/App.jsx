@@ -8,6 +8,12 @@ function App() {
   const [debugInfo, setDebugInfo] = useState({});
   const messagesEndRef = useRef(null);
 
+  // Determine backend URL source
+  const backendUrl = import.meta.env.VITE_BACKEND_URL;
+  const backendUrlStatus = backendUrl
+    ? `✅ Using VITE_BACKEND_URL: ${backendUrl}`
+    : "❌ VITE_BACKEND_URL not set! Frontend cannot connect to backend.";
+
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
@@ -32,8 +38,6 @@ function App() {
     const timestamp = new Date().toISOString();
     const debugMessage = `[${timestamp}] ${message}`;
     console.log(debugMessage, data);
-    
-    // Store debug info for display
     setDebugInfo(prev => ({
       ...prev,
       lastLog: { message: debugMessage, data, timestamp }
@@ -42,61 +46,39 @@ function App() {
 
   const sendMessage = async () => {
     if (!input.trim()) return;
-    
     const userMsg = { sender: "user", text: input };
     setMessages((msgs) => [...msgs, userMsg]);
     setLoading(true);
     setInput("");
-    
     try {
-      const backendUrl = import.meta.env.VITE_BACKEND_URL;
+      if (!backendUrl) {
+        const errorMsg = "❌ VITE_BACKEND_URL is not set. Please configure it in Railway frontend service variables.";
+        logDebug(errorMsg);
+        setMessages((msgs) => [...msgs, { sender: "agent", text: errorMsg }]);
+        setLoading(false);
+        return;
+      }
       logDebug("🔗 Attempting to connect to backend", { backendUrl, question: input });
-      
       const requestBody = { question: input };
-      logDebug("📤 Sending request", { 
-        url: `${backendUrl}/ask`,
-        method: "POST",
-        body: requestBody
-      });
-
+      logDebug("📤 Sending request", { url: `${backendUrl}/ask`, method: "POST", body: requestBody });
       const res = await fetch(backendUrl + "/ask", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(requestBody),
       });
-      
-      logDebug("📥 Received response", { 
-        status: res.status, 
-        statusText: res.statusText,
-        headers: Object.fromEntries(res.headers.entries())
-      });
-
+      logDebug("📥 Received response", { status: res.status, statusText: res.statusText, headers: Object.fromEntries(res.headers.entries()) });
       if (!res.ok) {
         throw new Error(`HTTP ${res.status}: ${res.statusText}`);
       }
-
       const data = await res.json();
-      logDebug("✅ Response data received", { 
-        answerLength: data.answer?.length,
-        hasDebug: !!data.debug,
-        debugInfo: data.debug
-      });
-      
+      logDebug("✅ Response data received", { answerLength: data.answer?.length, hasDebug: !!data.debug, debugInfo: data.debug });
       setMessages((msgs) => [...msgs, { sender: "agent", text: data.answer }]);
-      
-      // Log debug info from backend if available
       if (data.debug) {
         logDebug("🔍 Backend debug info", data.debug);
       }
-      
     } catch (e) {
       const errorMsg = `❌ Error: ${e.message}`;
-      logDebug("❌ Request failed", { 
-        error: e.message, 
-        errorType: e.name,
-        stack: e.stack 
-      });
-      
+      logDebug("❌ Request failed", { error: e.message, errorType: e.name, stack: e.stack });
       setMessages((msgs) => [...msgs, { sender: "agent", text: errorMsg }]);
     }
     setLoading(false);
@@ -104,9 +86,11 @@ function App() {
 
   // Debug function to test backend connection
   const testBackendConnection = async () => {
-    const backendUrl = import.meta.env.VITE_BACKEND_URL || "http://localhost:8000";
+    if (!backendUrl) {
+      logDebug("❌ VITE_BACKEND_URL is not set. Cannot test backend connection.");
+      return null;
+    }
     logDebug("🧪 Testing backend connection", { backendUrl });
-    
     try {
       const res = await fetch(backendUrl + "/health");
       const data = await res.json();
@@ -121,12 +105,10 @@ function App() {
   // Test connection on component mount
   useEffect(() => {
     logDebug("🚀 Frontend initialized", {
-      backendUrl: import.meta.env.VITE_BACKEND_URL || "http://localhost:8000",
+      backendUrl: backendUrl || "(not set)",
       environment: import.meta.env.MODE,
       timestamp: new Date().toISOString()
     });
-    
-    // Test backend connection
     testBackendConnection();
   }, []);
 
@@ -162,7 +144,7 @@ function App() {
           padding: "8px",
           borderRadius: "4px"
         }}>
-          <div>🔗 Backend: {import.meta.env.VITE_BACKEND_URL || "http://localhost:8000"}</div>
+          <div>{backendUrlStatus}</div>
           <div>🌍 Environment: {import.meta.env.MODE}</div>
           {debugInfo.lastLog && (
             <div>📝 Last Log: {debugInfo.lastLog.message}</div>
