@@ -47,7 +47,7 @@ frontend/build/
 frontend/dist/
 
 # ChromaDB
-backend/chroma_db/
+# backend/chroma_db/
 backend/chroma_db_old/
 
 # IDE

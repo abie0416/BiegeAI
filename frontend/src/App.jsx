@@ -8,11 +8,14 @@ function App() {
   const [debugInfo, setDebugInfo] = useState({});
   const messagesEndRef = useRef(null);
 
-  // Determine backend URL source with fallback
-  const backendUrl = import.meta.env.VITE_BACKEND_URL || "https://biegeai.up.railway.app";
+  // Determine backend URL based on environment
+  const isDevelopment = import.meta.env.MODE === 'development';
+  const backendUrl = import.meta.env.VITE_BACKEND_URL || (isDevelopment ? "http://localhost:8000" : "https://biegeai.up.railway.app");
   const backendUrlStatus = import.meta.env.VITE_BACKEND_URL
     ? `✅ Using VITE_BACKEND_URL: ${import.meta.env.VITE_BACKEND_URL}`
-    : `⚠️ VITE_BACKEND_URL not set! Using fallback: https://biegeai.up.railway.app`;
+    : isDevelopment 
+      ? `✅ Development mode: Using localhost:8000`
+      : `⚠️ VITE_BACKEND_URL not set! Using production fallback: https://biegeai.up.railway.app`;
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });

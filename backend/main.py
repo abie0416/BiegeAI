@@ -1,15 +1,25 @@
 import os
 import logging
+import sys
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 from agent.gemini_client import GeminiClient
 from agent.mcp import run_mcp
-from agent.rag import run_rag
+from agent.rag import fetch_documents
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
+# Configure logging with forced output
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ]
+)
 logger = logging.getLogger(__name__)
+
+# Force stdout to flush immediately
+sys.stdout.flush()
 
 # Load environment variables
 load_dotenv()
@@ -40,6 +50,17 @@ except Exception as e:
     logger.error(f"❌ Failed to initialize Gemini client: {e}")
     gemini_client = None
 
+def get_rag_context(question: str) -> str:
+    """Always fetch RAG context for the question"""
+    try:
+        logger.info("🔍 Fetching RAG context...")
+        rag_context = fetch_documents(question)
+        logger.info(f"✅ RAG context fetched: {len(rag_context)} characters")
+        return rag_context
+    except Exception as e:
+        logger.error(f"❌ RAG context fetch failed: {e}")
+        return f"RAG Error: {str(e)}"
+
 @app.get("/")
 async def root():
     logger.info("📥 Root endpoint accessed")
@@ -57,6 +78,20 @@ async def root():
             "ask": "/ask (POST)"
         }
     }
+
+@app.get("/test-logs")
+async def test_logs():
+    """Test endpoint to verify logging is working"""
+    logger.debug("DEBUG: This is a debug message")
+    logger.info("INFO: This is an info message")
+    logger.warning("WARNING: This is a warning message")
+    logger.error("ERROR: This is an error message")
+    
+    # Also test print statements
+    print("PRINT: This is a print statement")
+    sys.stdout.flush()
+    
+    return {"message": "Log test completed", "check_console": True}
 
 @app.post("/ask")
 async def ask(request: Request):
@@ -78,45 +113,33 @@ async def ask(request: Request):
         
         logger.info(f"🤔 Processing question: {question[:50]}...")
         
-        # Try RAG first, fallback to MCP if needed
-        try:
-            rag_answer = run_rag(question, gemini_client)
-            logger.info(f"🔍 RAG returned: {rag_answer[:100]}...")
-        except Exception as e:
-            logger.error(f"❌ RAG failed: {e}")
-            rag_answer = f"RAG Error: {str(e)}"
+        # Step 1: Always fetch RAG context
+        rag_context = get_rag_context(question)
         
-        # If RAG doesn't find relevant context, use MCP
-        if ("don't know" in rag_answer.lower() or 
-            "no relevant" in rag_answer.lower() or 
-            "cannot be answered" in rag_answer.lower() or
-            "does not offer" in rag_answer.lower() or
-            "does not contain" in rag_answer.lower() or
-            "rag error" in rag_answer.lower()):
-            
-            logger.info("🔄 RAG didn't find relevant info, switching to MCP")
-            try:
-                answer = run_mcp(question, gemini_client)
-                logger.info(f"🧠 MCP returned: {answer[:100]}...")
-                method_used = "MCP"
-            except Exception as e:
-                logger.error(f"❌ MCP failed: {e}")
-                answer = f"MCP Error: {str(e)}"
-                method_used = "MCP_ERROR"
-        else:
-            logger.info("✅ Using RAG answer")
-            answer = rag_answer
-            method_used = "RAG"
+        # Step 2: Run MCP with RAG context and let model decide tools
+        try:
+            answer = run_mcp(question, gemini_client, rag_context)
+            logger.info(f"✅ MCP completed successfully")
+            method_used = "MCP_WITH_RAG_CONTEXT"
+        except Exception as e:
+            logger.error(f"❌ MCP failed: {e}")
+            # Fallback to direct RAG answer if MCP fails
+            answer = rag_context
+            method_used = "RAG_FALLBACK"
+            logger.info("⚠️ Using RAG answer as fallback")
+        
+        # Prepare debug information
+        debug_info = {
+            "rag_context_length": len(rag_context),
+            "final_method": method_used,
+            "question_length": len(question),
+            "answer_length": len(answer) if answer else 0
+        }
         
         logger.info(f"✅ Successfully processed question using {method_used}")
         return {
             "answer": answer, 
-            "debug": {
-                "rag_answer": rag_answer, 
-                "final_method": method_used,
-                "question_length": len(question),
-                "answer_length": len(answer)
-            }
+            "debug": debug_info
         }
         
     except Exception as e:
@@ -164,6 +187,7 @@ async def debug_info():
             "root": "/",
             "health": "/health",
             "ask": "/ask (POST)",
-            "debug": "/debug"
+            "debug": "/debug",
+            "test_logs": "/test-logs"
         }
     } 
