@@ -49,7 +49,7 @@ function App() {
     setInput("");
     
     try {
-      const backendUrl = import.meta.env.VITE_BACKEND_URL || "http://localhost:8000";
+      const backendUrl = import.meta.env.VITE_BACKEND_URL;
       logDebug("🔗 Attempting to connect to backend", { backendUrl, question: input });
       
       const requestBody = { question: input };
