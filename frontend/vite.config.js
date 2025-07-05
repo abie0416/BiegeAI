@@ -6,4 +6,12 @@ export default defineConfig({
   server: {
     port: 5173,
   },
+  build: {
+    outDir: 'dist',
+    sourcemap: false,
+    minify: 'terser',
+  },
+  preview: {
+    port: 5173,
+  },
 }); 
