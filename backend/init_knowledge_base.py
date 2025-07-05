@@ -9,6 +9,14 @@ from db.chroma_client import add_documents_to_vectorstore
 sample_documents = [
     "Eric是O孝子",
     "Eric投篮还可以，但是没有zzn准",
+    "911比718牛逼",
+    "马棚是老司机",
+    "Final全能王",
+    "小瘦哥玩鸟狙很厉害",
+    "段神是道具王",
+    "吴非是亚马逊AI王",
+    "abie就是憋哥",
+    "憋哥牛逼",
 ]
 
 # sample_metadatas = [

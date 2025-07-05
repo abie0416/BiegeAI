@@ -5,6 +5,7 @@ function App() {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [typingDots, setTypingDots] = useState("");
+  const [debugInfo, setDebugInfo] = useState({});
   const messagesEndRef = useRef(null);
 
   const scrollToBottom = () => {
@@ -26,26 +27,108 @@ function App() {
     }
   }, [loading]);
 
+  // Debug function to log information
+  const logDebug = (message, data = null) => {
+    const timestamp = new Date().toISOString();
+    const debugMessage = `[${timestamp}] ${message}`;
+    console.log(debugMessage, data);
+    
+    // Store debug info for display
+    setDebugInfo(prev => ({
+      ...prev,
+      lastLog: { message: debugMessage, data, timestamp }
+    }));
+  };
+
   const sendMessage = async () => {
     if (!input.trim()) return;
+    
     const userMsg = { sender: "user", text: input };
     setMessages((msgs) => [...msgs, userMsg]);
     setLoading(true);
     setInput("");
+    
     try {
       const backendUrl = import.meta.env.VITE_BACKEND_URL || "http://localhost:8000";
+      logDebug("🔗 Attempting to connect to backend", { backendUrl, question: input });
+      
+      const requestBody = { question: input };
+      logDebug("📤 Sending request", { 
+        url: `${backendUrl}/ask`,
+        method: "POST",
+        body: requestBody
+      });
+
       const res = await fetch(backendUrl + "/ask", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: input }),
+        body: JSON.stringify(requestBody),
       });
+      
+      logDebug("📥 Received response", { 
+        status: res.status, 
+        statusText: res.statusText,
+        headers: Object.fromEntries(res.headers.entries())
+      });
+
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+      }
+
       const data = await res.json();
+      logDebug("✅ Response data received", { 
+        answerLength: data.answer?.length,
+        hasDebug: !!data.debug,
+        debugInfo: data.debug
+      });
+      
       setMessages((msgs) => [...msgs, { sender: "agent", text: data.answer }]);
+      
+      // Log debug info from backend if available
+      if (data.debug) {
+        logDebug("🔍 Backend debug info", data.debug);
+      }
+      
     } catch (e) {
-      setMessages((msgs) => [...msgs, { sender: "agent", text: "Error: " + e.message }]);
+      const errorMsg = `❌ Error: ${e.message}`;
+      logDebug("❌ Request failed", { 
+        error: e.message, 
+        errorType: e.name,
+        stack: e.stack 
+      });
+      
+      setMessages((msgs) => [...msgs, { sender: "agent", text: errorMsg }]);
     }
     setLoading(false);
   };
+
+  // Debug function to test backend connection
+  const testBackendConnection = async () => {
+    const backendUrl = import.meta.env.VITE_BACKEND_URL || "http://localhost:8000";
+    logDebug("🧪 Testing backend connection", { backendUrl });
+    
+    try {
+      const res = await fetch(backendUrl + "/health");
+      const data = await res.json();
+      logDebug("✅ Backend health check successful", data);
+      return data;
+    } catch (e) {
+      logDebug("❌ Backend health check failed", { error: e.message });
+      return null;
+    }
+  };
+
+  // Test connection on component mount
+  useEffect(() => {
+    logDebug("🚀 Frontend initialized", {
+      backendUrl: import.meta.env.VITE_BACKEND_URL || "http://localhost:8000",
+      environment: import.meta.env.MODE,
+      timestamp: new Date().toISOString()
+    });
+    
+    // Test backend connection
+    testBackendConnection();
+  }, []);
 
   return (
     <div style={{ 
@@ -69,6 +152,22 @@ function App() {
         <p style={{ margin: "8px 0 0 0", opacity: 0.9, fontSize: "1.1rem" }}>
           Your Intelligent AI Assistant
         </p>
+        {/* Debug Info Display */}
+        <div style={{ 
+          marginTop: "10px", 
+          fontSize: "0.8rem", 
+          opacity: 0.8,
+          textAlign: "left",
+          background: "rgba(255,255,255,0.1)",
+          padding: "8px",
+          borderRadius: "4px"
+        }}>
+          <div>🔗 Backend: {import.meta.env.VITE_BACKEND_URL || "http://localhost:8000"}</div>
+          <div>🌍 Environment: {import.meta.env.MODE}</div>
+          {debugInfo.lastLog && (
+            <div>📝 Last Log: {debugInfo.lastLog.message}</div>
+          )}
+        </div>
       </div>
 
       {/* Chat Container */}
@@ -219,6 +318,24 @@ function App() {
               }}
             >
               {loading ? "Sending..." : "Send"}
+            </button>
+          </div>
+          
+          {/* Debug Button */}
+          <div style={{ marginTop: "10px", textAlign: "center" }}>
+            <button 
+              onClick={testBackendConnection}
+              style={{
+                padding: "8px 16px",
+                borderRadius: "15px",
+                border: "1px solid #667eea",
+                background: "transparent",
+                color: "#667eea",
+                fontSize: "0.8rem",
+                cursor: "pointer"
+              }}
+            >
+              🔍 Test Backend Connection
             </button>
           </div>
         </div>
