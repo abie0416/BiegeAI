@@ -8,11 +8,11 @@ function App() {
   const [debugInfo, setDebugInfo] = useState({});
   const messagesEndRef = useRef(null);
 
-  // Determine backend URL source
-  const backendUrl = import.meta.env.VITE_BACKEND_URL;
-  const backendUrlStatus = backendUrl
-    ? `✅ Using VITE_BACKEND_URL: ${backendUrl}`
-    : "❌ VITE_BACKEND_URL not set! Frontend cannot connect to backend.";
+  // Determine backend URL source with fallback
+  const backendUrl = import.meta.env.VITE_BACKEND_URL || "https://biegeai.up.railway.app";
+  const backendUrlStatus = import.meta.env.VITE_BACKEND_URL
+    ? `✅ Using VITE_BACKEND_URL: ${import.meta.env.VITE_BACKEND_URL}`
+    : `⚠️ VITE_BACKEND_URL not set! Using fallback: https://biegeai.up.railway.app`;
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
