@@ -1,0 +1,17 @@
+[phases.setup]
+nixPkgs = ["python3", "nodejs", "npm"]
+
+[phases.install]
+cmds = [
+  "echo 'This is a monorepo with backend and frontend. Deploy them as separate services.'",
+  "echo 'Backend: cd backend && pip install -r requirements.txt'",
+  "echo 'Frontend: cd frontend && npm install'"
+]
+
+[phases.build]
+cmds = [
+  "echo 'Build commands should be specified in individual service directories'"
+]
+
+[start]
+cmd = "echo 'Please deploy backend and frontend as separate Railway services'" 
