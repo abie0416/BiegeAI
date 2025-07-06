@@ -32,7 +32,7 @@ sample_documents = [
 sample_metadatas = [
     {"source": "friends", "category": "person", "name": "Eric", "trait": "孝顺"},
     {"source": "gaming", "category": "skill", "name": "Eric", "game": "篮球", "comparison": "zzn"},
-    {"source": "cars", "category": "comparison", "brand": "保时捷", "models": ["911", "718"]},
+    {"source": "cars", "category": "comparison", "brand": "保时捷", "models": "911,718"},
     {"source": "friends", "category": "person", "name": "马棚", "skill": "驾驶"},
     {"source": "gaming", "category": "skill", "name": "Final", "title": "全能王"},
     {"source": "gaming", "category": "skill", "name": "小瘦哥", "weapon": "狙击枪"},
@@ -66,6 +66,12 @@ def create_chunks_from_documents(documents, metadatas=None):
             chunk_metadata["chunk_index"] = str(j)
             chunk_metadata["total_chunks"] = str(len(chunks))
             chunk_metadata["original_document_index"] = str(i)
+            
+            # Ensure all metadata values are strings (ChromaDB requirement)
+            for key, value in chunk_metadata.items():
+                if not isinstance(value, (str, int, float, bool)) or value is None:
+                    chunk_metadata[key] = str(value)
+            
             all_chunks.append(chunk)
             all_chunk_metadatas.append(chunk_metadata)
     
