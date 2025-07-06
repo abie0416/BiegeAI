@@ -6,6 +6,8 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [typingDots, setTypingDots] = useState("");
   const [debugInfo, setDebugInfo] = useState({});
+  const [sessionId, setSessionId] = useState(null);
+  const [conversationStats, setConversationStats] = useState({});
   const messagesEndRef = useRef(null);
 
   // Determine backend URL based on environment
@@ -61,8 +63,11 @@ function App() {
         setLoading(false);
         return;
       }
-      logDebug("🔗 Attempting to connect to backend", { backendUrl, question: input });
-      const requestBody = { question: input };
+      logDebug("🔗 Attempting to connect to backend", { backendUrl, question: input, sessionId });
+      const requestBody = { 
+        question: input,
+        session_id: sessionId  // Include session ID for conversation continuity
+      };
       logDebug("📤 Sending request", { url: `${backendUrl}/ask`, method: "POST", body: requestBody });
       const res = await fetch(backendUrl + "/ask", {
         method: "POST",
@@ -75,7 +80,21 @@ function App() {
       }
       const data = await res.json();
       logDebug("✅ Response data received", { answerLength: data.answer?.length, hasDebug: !!data.debug, debugInfo: data.debug });
+      
+      // Update session ID if provided
+      if (data.session_id) {
+        setSessionId(data.session_id);
+        logDebug("🆔 Session ID updated", { sessionId: data.session_id });
+      }
+      
       setMessages((msgs) => [...msgs, { sender: "agent", text: data.answer }]);
+      
+      // Update conversation stats
+      if (data.debug?.conversation_stats) {
+        setConversationStats(data.debug.conversation_stats);
+        logDebug("📊 Conversation stats updated", data.debug.conversation_stats);
+      }
+      
       if (data.debug) {
         logDebug("🔍 Backend debug info", data.debug);
       }
@@ -105,6 +124,19 @@ function App() {
     }
   };
 
+  // Get conversation stats
+  const getConversationStats = async () => {
+    if (!backendUrl) return;
+    try {
+      const res = await fetch(backendUrl + "/conversation-stats");
+      const data = await res.json();
+      setConversationStats(data);
+      logDebug("📊 Conversation stats loaded", data);
+    } catch (e) {
+      logDebug("❌ Failed to load conversation stats", { error: e.message });
+    }
+  };
+
   // Test connection on component mount
   useEffect(() => {
     logDebug("🚀 Frontend initialized", {
@@ -113,6 +145,7 @@ function App() {
       timestamp: new Date().toISOString()
     });
     testBackendConnection();
+    getConversationStats();
   }, []);
 
   return (
@@ -149,6 +182,12 @@ function App() {
         }}>
           <div>{backendUrlStatus}</div>
           <div>🌍 Environment: {import.meta.env.MODE}</div>
+          {sessionId && (
+            <div>🆔 Session: {sessionId}</div>
+          )}
+          {conversationStats.total_sessions !== undefined && (
+            <div>💬 Sessions: {conversationStats.total_sessions}</div>
+          )}
           {debugInfo.lastLog && (
             <div>📝 Last Log: {debugInfo.lastLog.message}</div>
           )}
@@ -306,8 +345,8 @@ function App() {
             </button>
           </div>
           
-          {/* Debug Button */}
-          <div style={{ marginTop: "10px", textAlign: "center" }}>
+          {/* Debug Buttons */}
+          <div style={{ marginTop: "10px", textAlign: "center", display: "flex", gap: "8px", justifyContent: "center" }}>
             <button 
               onClick={testBackendConnection}
               style={{
@@ -320,7 +359,21 @@ function App() {
                 cursor: "pointer"
               }}
             >
-              🔍 Test Backend Connection
+              🔍 Test Connection
+            </button>
+            <button 
+              onClick={getConversationStats}
+              style={{
+                padding: "8px 16px",
+                borderRadius: "15px",
+                border: "1px solid #667eea",
+                background: "transparent",
+                color: "#667eea",
+                fontSize: "0.8rem",
+                cursor: "pointer"
+              }}
+            >
+              📊 Refresh Stats
             </button>
           </div>
         </div>

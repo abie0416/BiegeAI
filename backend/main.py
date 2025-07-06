@@ -8,6 +8,7 @@ from agent.gemini_client import GeminiClient
 from agent.mcp import run_mcp
 from agent.rag import fetch_documents
 from init_knowledge_base import init_knowledge_base
+from conversation_manager import conversation_manager
 
 # Configure logging with forced output
 logging.basicConfig(
@@ -115,6 +116,7 @@ async def ask(request: Request):
     try:
         data = await request.json()
         question = data.get("question")
+        session_id = data.get("session_id")  # Optional session ID from frontend
         
         if not question:
             logger.warning("⚠️ No question provided in request")
@@ -122,14 +124,29 @@ async def ask(request: Request):
         
         logger.info(f"🤔 Processing question: {question[:50]}...")
         
-        # Step 1: Always fetch RAG context
+        # Step 1: Manage conversation session
+        session_id = conversation_manager.get_or_create_session(session_id)
+        logger.info(f"📝 Using conversation session: {session_id}")
+        
+        # Step 2: Get conversation context
+        conversation_context, context_debug = conversation_manager.get_conversation_context(session_id, question)
+        logger.info(f"💬 Conversation context: {context_debug['message_count']} messages, {context_debug['context_length']} chars")
+        
+        # Step 3: Always fetch RAG context
         rag_context = get_rag_context(question)
         
-        # Step 2: Run MCP with RAG context and let model decide tools
+        # Step 4: Combine RAG and conversation context
+        combined_context = ""
+        if conversation_context:
+            combined_context += f"Previous conversation:\n{conversation_context}\n\n"
+        if rag_context:
+            combined_context += f"Relevant knowledge:\n{rag_context}\n\n"
+        
+        # Step 5: Run MCP with combined context
         try:
-            answer = run_mcp(question, gemini_client, rag_context)
+            answer = run_mcp(question, gemini_client, combined_context)
             logger.info(f"✅ MCP completed successfully")
-            method_used = "MCP_WITH_RAG_CONTEXT"
+            method_used = "MCP_WITH_COMBINED_CONTEXT"
         except Exception as e:
             logger.error(f"❌ MCP failed: {e}")
             # Fallback to direct RAG answer if MCP fails
@@ -137,17 +154,26 @@ async def ask(request: Request):
             method_used = "RAG_FALLBACK"
             logger.info("⚠️ Using RAG answer as fallback")
         
-        # Prepare debug information
+        # Step 6: Store messages in conversation history
+        conversation_manager.add_message(session_id, "user", question)
+        conversation_manager.add_message(session_id, "agent", answer)
+        
+        # Step 7: Prepare debug information
         debug_info = {
+            "session_id": session_id,
             "rag_context_length": len(rag_context),
+            "conversation_context_length": context_debug['context_length'],
+            "combined_context_length": len(combined_context),
             "final_method": method_used,
             "question_length": len(question),
-            "answer_length": len(answer) if answer else 0
+            "answer_length": len(answer) if answer else 0,
+            "conversation_stats": context_debug
         }
         
         logger.info(f"✅ Successfully processed question using {method_used}")
         return {
-            "answer": answer, 
+            "answer": answer,
+            "session_id": session_id,
             "debug": debug_info
         }
         
@@ -192,11 +218,37 @@ async def debug_info():
         "services": {
             "gemini_client": "Ready" if gemini_client else "Not ready"
         },
+        "conversation_manager": {
+            "total_sessions": len(conversation_manager.sessions),
+            "max_sessions": conversation_manager.max_sessions,
+            "session_timeout_minutes": conversation_manager.session_timeout_minutes
+        },
         "endpoints": {
             "root": "/",
             "health": "/health",
             "ask": "/ask (POST)",
             "debug": "/debug",
-            "test_logs": "/test-logs"
+            "test_logs": "/test-logs",
+            "conversations": "/conversations (GET)",
+            "conversation_stats": "/conversation-stats (GET)"
         }
+    }
+
+@app.get("/conversations")
+async def get_conversations():
+    """Get all conversation sessions"""
+    logger.info("📥 Conversations endpoint accessed")
+    return conversation_manager.get_all_sessions_stats()
+
+@app.get("/conversation-stats")
+async def get_conversation_stats():
+    """Get conversation manager statistics"""
+    logger.info("📥 Conversation stats endpoint accessed")
+    return {
+        "total_sessions": len(conversation_manager.sessions),
+        "max_sessions": conversation_manager.max_sessions,
+        "session_timeout_minutes": conversation_manager.session_timeout_minutes,
+        "max_messages_per_session": conversation_manager.max_messages_per_session,
+        "max_context_length": conversation_manager.max_context_length,
+        "consecutive_timeout_minutes": conversation_manager.consecutive_timeout_minutes
     } 
