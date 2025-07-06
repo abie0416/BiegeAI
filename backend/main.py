@@ -232,7 +232,8 @@ async def debug_info():
             "debug": "/debug",
             "test_logs": "/test-logs",
             "conversations": "/conversations (GET)",
-            "conversation_stats": "/conversation-stats (GET)"
+            "conversation_stats": "/conversation-stats (GET)",
+            "rag_config": "/rag-config (GET)"
         }
     }
 
@@ -253,4 +254,21 @@ async def get_conversation_stats():
         "max_messages_per_session": conversation_manager.max_messages_per_session,
         "max_context_length": conversation_manager.max_context_length,
         "consecutive_timeout_minutes": conversation_manager.consecutive_timeout_minutes
+    }
+
+@app.get("/rag-config")
+async def get_rag_config():
+    """Get RAG configuration and statistics"""
+    logger.info("📥 RAG config endpoint accessed")
+    from agent.rag import SIMILARITY_THRESHOLD, MIN_DOCUMENTS, MAX_DOCUMENTS
+    
+    return {
+        "similarity_threshold": SIMILARITY_THRESHOLD,
+        "min_documents": MIN_DOCUMENTS,
+        "max_documents": MAX_DOCUMENTS,
+        "description": {
+            "similarity_threshold": "Minimum similarity score (0-1) for document inclusion",
+            "min_documents": "Minimum documents to return even if below threshold",
+            "max_documents": "Maximum documents to retrieve initially"
+        }
     } 
