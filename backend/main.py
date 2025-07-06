@@ -233,7 +233,7 @@ async def debug_info():
             "test_logs": "/test-logs",
             "conversations": "/conversations (GET)",
             "conversation_stats": "/conversation-stats (GET)",
-            "rag_config": "/rag-config (GET)"
+            "rebuild_rag": "/rebuild-rag (POST)"
         }
     }
 
@@ -256,20 +256,60 @@ async def get_conversation_stats():
         "consecutive_timeout_minutes": conversation_manager.consecutive_timeout_minutes
     }
 
-@app.get("/rag-config")
-async def get_rag_config():
-    """Get RAG configuration and statistics"""
-    logger.info("📥 RAG config endpoint accessed")
-    from agent.rag import SIMILARITY_THRESHOLD, MIN_DOCUMENTS, MAX_DOCUMENTS
+@app.post("/rebuild-rag")
+async def rebuild_rag():
+    """Rebuild RAG knowledge base and return number of successfully embedded documents"""
+    logger.info("📥 Rebuild RAG endpoint accessed")
     
-    return {
-        "similarity_threshold": SIMILARITY_THRESHOLD,
-        "min_documents": MIN_DOCUMENTS,
-        "max_documents": MAX_DOCUMENTS,
-        "description": {
-            "similarity_threshold": "Cosine distance threshold (0-1, lower is better)",
-            "min_documents": "Minimum documents to return even if below threshold",
-            "max_documents": "Maximum documents to retrieve initially"
-        },
-        "note": "Using cosine distance where lower scores indicate more similarity. Documents with distance <= threshold are included."
-    } 
+    try:
+        from init_knowledge_base import init_knowledge_base, sample_documents
+        from db.chroma_client import get_vectorstore
+        
+        # Clear existing vectorstore
+        logger.info("🗑️ Clearing existing vectorstore...")
+        vectorstore = get_vectorstore()
+        try:
+            collection = vectorstore._collection
+            collection.delete(where={})
+            logger.info("✅ Existing documents cleared")
+        except Exception as e:
+            logger.warning(f"⚠️ Could not clear existing collection: {e}")
+        
+        # Rebuild knowledge base
+        logger.info("🔨 Rebuilding knowledge base...")
+        init_knowledge_base()
+        
+        # Verify the rebuild by counting documents
+        try:
+            collection = vectorstore._collection
+            count = collection.count()
+            logger.info(f"✅ Rebuild completed successfully. {count} documents embedded and stored.")
+            
+            return {
+                "success": True,
+                "message": f"RAG knowledge base rebuilt successfully",
+                "documents_embedded": count,
+                "total_sample_documents": len(sample_documents),
+                "details": f"Successfully embedded and stored {count} document chunks from {len(sample_documents)} sample documents"
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Error counting documents after rebuild: {e}")
+            return {
+                "success": False,
+                "message": f"Rebuild completed but could not verify document count: {str(e)}",
+                "documents_embedded": "unknown",
+                "total_sample_documents": len(sample_documents),
+                "error": str(e)
+            }
+            
+    except Exception as e:
+        error_msg = f"❌ Error rebuilding RAG knowledge base: {str(e)}"
+        logger.error(f"❌ Error in rebuild_rag endpoint: {e}")
+        return {
+            "success": False,
+            "message": error_msg,
+            "documents_embedded": 0,
+            "total_sample_documents": len(sample_documents) if 'sample_documents' in locals() else "unknown",
+            "error": str(e)
+        } 

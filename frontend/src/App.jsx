@@ -8,6 +8,8 @@ function App() {
   const [debugInfo, setDebugInfo] = useState({});
   const [sessionId, setSessionId] = useState(null);
   const [conversationStats, setConversationStats] = useState({});
+  const [rebuildResult, setRebuildResult] = useState(null);
+  const [rebuildLoading, setRebuildLoading] = useState(false);
   const messagesEndRef = useRef(null);
 
   // Determine backend URL based on environment
@@ -134,6 +136,46 @@ function App() {
       logDebug("📊 Conversation stats loaded", data);
     } catch (e) {
       logDebug("❌ Failed to load conversation stats", { error: e.message });
+    }
+  };
+
+  // Rebuild RAG knowledge base
+  const rebuildRag = async () => {
+    if (!backendUrl) {
+      logDebug("❌ VITE_BACKEND_URL is not set. Cannot rebuild RAG.");
+      return;
+    }
+    
+    setRebuildLoading(true);
+    setRebuildResult(null);
+    logDebug("🔨 Starting RAG rebuild", { backendUrl });
+    
+    try {
+      const res = await fetch(backendUrl + "/rebuild-rag", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" }
+      });
+      
+      const data = await res.json();
+      setRebuildResult(data);
+      
+      if (data.success) {
+        logDebug("✅ RAG rebuild successful", data);
+      } else {
+        logDebug("❌ RAG rebuild failed", data);
+      }
+    } catch (e) {
+      const errorData = {
+        success: false,
+        message: `Network error: ${e.message}`,
+        documents_embedded: 0,
+        total_sample_documents: "unknown",
+        error: e.message
+      };
+      setRebuildResult(errorData);
+      logDebug("❌ RAG rebuild network error", { error: e.message });
+    } finally {
+      setRebuildLoading(false);
     }
   };
 
@@ -346,7 +388,7 @@ function App() {
           </div>
           
           {/* Debug Buttons */}
-          <div style={{ marginTop: "10px", textAlign: "center", display: "flex", gap: "8px", justifyContent: "center" }}>
+          <div style={{ marginTop: "10px", textAlign: "center", display: "flex", gap: "8px", justifyContent: "center", flexWrap: "wrap" }}>
             <button 
               onClick={testBackendConnection}
               style={{
@@ -375,7 +417,55 @@ function App() {
             >
               📊 Refresh Stats
             </button>
+            <button 
+              onClick={rebuildRag}
+              disabled={rebuildLoading}
+              style={{
+                padding: "8px 16px",
+                borderRadius: "15px",
+                border: "1px solid #667eea",
+                background: rebuildLoading ? "#cccccc" : "transparent",
+                color: rebuildLoading ? "#999999" : "#667eea",
+                fontSize: "0.8rem",
+                cursor: rebuildLoading ? "not-allowed" : "pointer"
+              }}
+            >
+              {rebuildLoading ? "🔨 Rebuilding..." : "🔨 Rebuild RAG"}
+            </button>
           </div>
+          
+          {/* Rebuild Result Display */}
+          {rebuildResult && (
+            <div style={{ 
+              marginTop: "10px", 
+              padding: "12px", 
+              borderRadius: "8px", 
+              background: rebuildResult.success ? "#d4edda" : "#f8d7da",
+              border: `1px solid ${rebuildResult.success ? "#c3e6cb" : "#f5c6cb"}`,
+              color: rebuildResult.success ? "#155724" : "#721c24",
+              fontSize: "0.85rem"
+            }}>
+              <div style={{ fontWeight: "bold", marginBottom: "4px" }}>
+                {rebuildResult.success ? "✅ RAG Rebuild Complete" : "❌ RAG Rebuild Failed"}
+              </div>
+              <div>{rebuildResult.message}</div>
+              {rebuildResult.documents_embedded !== undefined && (
+                <div style={{ marginTop: "4px" }}>
+                  📄 Documents: {rebuildResult.documents_embedded} / {rebuildResult.total_sample_documents}
+                </div>
+              )}
+              {rebuildResult.details && (
+                <div style={{ marginTop: "4px", fontSize: "0.8rem", opacity: 0.8 }}>
+                  {rebuildResult.details}
+                </div>
+              )}
+              {rebuildResult.error && (
+                <div style={{ marginTop: "4px", fontSize: "0.8rem", opacity: 0.8 }}>
+                  Error: {rebuildResult.error}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
