@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 # Configuration for RAG filtering
 SIMILARITY_THRESHOLD = 0.7  # Minimum similarity score (0-1)
 MIN_DOCUMENTS = 1  # Minimum documents to return even if below threshold
-MAX_DOCUMENTS = 5  # Maximum documents to retrieve initially
+MAX_DOCUMENTS = 10  # Maximum documents to retrieve initially
 
 def fetch_documents_with_scores(question, k=MAX_DOCUMENTS) -> List[Tuple[Document, float]]:
     """Fetch relevant documents with similarity scores"""
@@ -63,7 +63,7 @@ def filter_documents_by_similarity(docs_and_scores: List[Tuple[Document, float]]
     
     return filtered_docs
 
-def fetch_documents(question, k=3):
+def fetch_documents(question, k=MAX_DOCUMENTS):
     """Fetch relevant documents from the knowledge base with similarity filtering"""
     try:
         logger.info(f"[DEBUG] RAG: Fetching documents for question: {question}")
@@ -145,7 +145,7 @@ def run_rag(question, gemini_client):
         # Create retrieval QA chain with filtered documents
         qa_chain = RetrievalQA.from_chain_type(
             llm=gemini_client.llm,
-            chain_type="stuff",
+            chain_type="map_reduce",
             retriever=vectorstore.as_retriever(search_kwargs={"k": len(docs)}),
             chain_type_kwargs={"prompt": prompt}
         )

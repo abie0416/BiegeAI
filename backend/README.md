@@ -24,6 +24,9 @@ This backend uses FastAPI, ChromaDB, and LangChain to integrate with the Gemini 
 ## Features
 
 - **RAG (Retrieval-Augmented Generation)**: Uses ChromaDB vectorstore with sentence transformers for semantic search
+- **Advanced Text Chunking**: RecursiveCharacterTextSplitter with 200-character chunks and 50-character overlap
+- **Multi-Document Retrieval**: Retrieves up to 10 documents with similarity filtering
+- **Map-Reduce Chain**: Uses LangChain's map_reduce for better chunk processing
 - **MCP (Multi-Component Pipeline)**: LangChain agent with multiple tools for complex reasoning
 - **LangChain Integration**: Clean, maintainable code using LangChain abstractions
 - **Gemini Pro**: Latest Google Gemini model for text generation
