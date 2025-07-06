@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 from agent.gemini_client import GeminiClient
 from agent.mcp import run_mcp
 from agent.rag import fetch_documents
+from init_knowledge_base import init_knowledge_base
 
 # Configure logging with forced output
 logging.basicConfig(
@@ -49,6 +50,14 @@ try:
 except Exception as e:
     logger.error(f"❌ Failed to initialize Gemini client: {e}")
     gemini_client = None
+
+# Initialize knowledge base with sample data
+try:
+    logger.info("📚 Initializing knowledge base...")
+    init_knowledge_base()
+    logger.info("✅ Knowledge base initialized successfully")
+except Exception as e:
+    logger.error(f"❌ Failed to initialize knowledge base: {e}")
 
 def get_rag_context(question: str) -> str:
     """Always fetch RAG context for the question"""

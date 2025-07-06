@@ -3,7 +3,13 @@
 Initialize the knowledge base with sample data for testing RAG functionality.
 """
 
-from db.chroma_client import add_documents_to_vectorstore
+import logging
+import os
+import shutil
+from db.chroma_client import add_documents_to_vectorstore, get_vectorstore
+
+# Get logger for this module
+logger = logging.getLogger(__name__)
 
 # Sample knowledge base data
 sample_documents = [
@@ -32,14 +38,42 @@ sample_documents = [
 
 def init_knowledge_base():
     """Initialize the knowledge base with sample data"""
-    print("Initializing knowledge base with sample data...")
+    logger.info("Initializing knowledge base with sample data...")
     
     try:
+        # Check if database already exists and has content
+        chroma_db_path = "./chroma_db"
+        vectorstore = get_vectorstore()
+        
+        # Try to get collection count to see if it's empty
+        try:
+            collection = vectorstore._collection
+            count = collection.count()
+            logger.info(f"Existing database has {count} documents")
+            
+            if count > 0:
+                logger.info("✅ Knowledge base already initialized with data")
+                return
+        except Exception:
+            logger.info("No existing collection found, will create new one")
+        
+        # Clear existing database if it exists but is empty or corrupted
+        if os.path.exists(chroma_db_path):
+            try:
+                logger.info("Clearing existing ChromaDB data...")
+                shutil.rmtree(chroma_db_path)
+                logger.info("✅ Existing database cleared")
+            except PermissionError:
+                logger.warning("⚠️ Could not clear existing database (files in use), will try to add to existing")
+        
+        # Initialize fresh vectorstore
         add_documents_to_vectorstore(sample_documents)
-        print("✅ Knowledge base initialized successfully!")
-        print(f"Added {len(sample_documents)} documents to the vectorstore.")
+        logger.info("✅ Knowledge base initialized successfully!")
+        logger.info(f"Added {len(sample_documents)} documents to the vectorstore.")
+        
     except Exception as e:
-        print(f"❌ Error initializing knowledge base: {e}")
+        logger.error(f"❌ Error initializing knowledge base: {e}")
+        raise
 
 if __name__ == "__main__":
     init_knowledge_base() 
