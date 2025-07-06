@@ -56,6 +56,36 @@ except Exception as e:
     logger.error(f"❌ Failed to initialize Gemini client: {e}")
     gemini_client = None
 
+def get_documents_from_sheets_with_fallback():
+    """Get documents from Google Sheets with fallback to hardcoded documents"""
+    fallback_documents = [
+        "Eric是O孝子，他非常孝顺父母，经常帮助家里做家务。Eric在朋友中很受欢迎，大家都喜欢和他一起玩。",
+        "Eric投篮还可以，但是没有zzn准。Eric在篮球场上表现不错，但是zzn的投篮技术更加精准，命中率更高。",
+        "911比718牛逼，保时捷911是经典跑车，性能卓越。718虽然也不错，但在很多方面都不如911出色。",
+        "马棚是老司机，开车技术很好，经验丰富。他经常开车带大家出去玩，大家都觉得坐他的车很安全。",
+        "Final全能王，在游戏Final中表现非常出色，各种角色都能玩得很好。他是大家公认的游戏高手。",
+        "小瘦哥玩鸟狙很厉害，在射击游戏中特别擅长使用狙击枪。他的瞄准技术非常精准，经常能一枪爆头。",
+        "段神是道具王，在游戏中特别擅长使用各种道具。他对游戏道具的理解很深，总能找到最有效的使用方法。",
+        "吴非是亚马逊AI王，在亚马逊工作，专门负责AI相关项目。他在人工智能领域很有经验，技术能力很强。",
+        "abie就是憋哥，这是他的外号。abie性格比较内向，不太爱说话，所以大家叫他憋哥。",
+        "憋哥牛逼，虽然abie比较内向，但是他的能力很强，在很多方面都很出色，大家都很佩服他。",
+    ]
+    
+    try:
+        from services.google_sheets import sheets_service
+        sheets_docs = sheets_service.get_documents()
+        if sheets_docs:
+            # Extract content from documents
+            documents = [doc.get('content', '') for doc in sheets_docs if doc.get('content')]
+            logger.info(f"✅ Successfully fetched {len(documents)} documents from Google Sheets")
+            return documents
+        else:
+            logger.warning("⚠️ No documents found in Google Sheets, using fallback data")
+            return fallback_documents
+    except Exception as e:
+        logger.warning(f"⚠️ Could not fetch from Google Sheets: {e}, using fallback data")
+        return fallback_documents
+
 def initialize_rag_knowledge_base():
     """Initialize RAG knowledge base on startup"""
     try:
@@ -91,38 +121,6 @@ def initialize_rag_knowledge_base():
 
 # Initialize RAG knowledge base on startup
 rag_initialized = initialize_rag_knowledge_base()
-
-
-
-def get_documents_from_sheets_with_fallback():
-    """Get documents from Google Sheets with fallback to hardcoded documents"""
-    fallback_documents = [
-        "Eric是O孝子，他非常孝顺父母，经常帮助家里做家务。Eric在朋友中很受欢迎，大家都喜欢和他一起玩。",
-        "Eric投篮还可以，但是没有zzn准。Eric在篮球场上表现不错，但是zzn的投篮技术更加精准，命中率更高。",
-        "911比718牛逼，保时捷911是经典跑车，性能卓越。718虽然也不错，但在很多方面都不如911出色。",
-        "马棚是老司机，开车技术很好，经验丰富。他经常开车带大家出去玩，大家都觉得坐他的车很安全。",
-        "Final全能王，在游戏Final中表现非常出色，各种角色都能玩得很好。他是大家公认的游戏高手。",
-        "小瘦哥玩鸟狙很厉害，在射击游戏中特别擅长使用狙击枪。他的瞄准技术非常精准，经常能一枪爆头。",
-        "段神是道具王，在游戏中特别擅长使用各种道具。他对游戏道具的理解很深，总能找到最有效的使用方法。",
-        "吴非是亚马逊AI王，在亚马逊工作，专门负责AI相关项目。他在人工智能领域很有经验，技术能力很强。",
-        "abie就是憋哥，这是他的外号。abie性格比较内向，不太爱说话，所以大家叫他憋哥。",
-        "憋哥牛逼，虽然abie比较内向，但是他的能力很强，在很多方面都很出色，大家都很佩服他。",
-    ]
-    
-    try:
-        from services.google_sheets import sheets_service
-        sheets_docs = sheets_service.get_documents()
-        if sheets_docs:
-            # Extract content from documents
-            documents = [doc.get('content', '') for doc in sheets_docs if doc.get('content')]
-            logger.info(f"✅ Successfully fetched {len(documents)} documents from Google Sheets")
-            return documents
-        else:
-            logger.warning("⚠️ No documents found in Google Sheets, using fallback data")
-            return fallback_documents
-    except Exception as e:
-        logger.warning(f"⚠️ Could not fetch from Google Sheets: {e}, using fallback data")
-        return fallback_documents
 
 def get_rag_context(question: str) -> str:
     """Always fetch RAG context for the question using advanced RAG service"""

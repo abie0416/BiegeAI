@@ -23,28 +23,29 @@ class GoogleSheetsService:
         self.spreadsheet_id = SPREADSHEET_ID
         
     def authenticate(self):
-        """Authenticate with Google Sheets API using service account"""
+        """Authenticate with Google Sheets API using service account from environment variable"""
         try:
-            # Use service account credentials directly
-            # Use simple filename since server runs from backend directory
-            default_path = 'google_sheets_service_account.json'
-            service_account_path = os.getenv('GOOGLE_APPLICATION_CREDENTIALS', default_path)
+            # Get service account JSON from environment variable
+            service_account_json = os.getenv('GOOGLE_SERVICE_ACCOUNT_JSON')
             
-            # Debug path resolution
-            logger.info(f"🔍 Looking for service account file at: {os.path.abspath(service_account_path)}")
-            logger.info(f"🔍 File exists: {os.path.exists(service_account_path)}")
+            if not service_account_json:
+                logger.error("❌ GOOGLE_SERVICE_ACCOUNT_JSON environment variable not set")
+                return False
             
-            if not os.path.exists(service_account_path):
-                logger.error(f"❌ Service account file not found: {service_account_path}")
+            # Parse the JSON string
+            try:
+                service_account_info = json.loads(service_account_json)
+            except json.JSONDecodeError as e:
+                logger.error(f"❌ Invalid JSON in GOOGLE_SERVICE_ACCOUNT_JSON: {e}")
                 return False
                 
             from google.oauth2 import service_account
-            creds = service_account.Credentials.from_service_account_file(
-                service_account_path, scopes=SCOPES
+            creds = service_account.Credentials.from_service_account_info(
+                service_account_info, scopes=SCOPES
             )
             
             self.service = build('sheets', 'v4', credentials=creds)
-            logger.info("✅ Google Sheets API authenticated successfully with service account")
+            logger.info("✅ Google Sheets API authenticated successfully with service account from environment")
             return True
             
         except Exception as e:
