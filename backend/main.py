@@ -267,8 +267,9 @@ async def get_rag_config():
         "min_documents": MIN_DOCUMENTS,
         "max_documents": MAX_DOCUMENTS,
         "description": {
-            "similarity_threshold": "Minimum similarity score (0-1) for document inclusion",
+            "similarity_threshold": "Cosine distance threshold (0-1, lower is better)",
             "min_documents": "Minimum documents to return even if below threshold",
             "max_documents": "Maximum documents to retrieve initially"
-        }
+        },
+        "note": "Using cosine distance where lower scores indicate more similarity. Documents with distance <= threshold are included."
     } 

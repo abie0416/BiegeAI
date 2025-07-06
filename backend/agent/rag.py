@@ -11,7 +11,7 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 # Configuration for RAG filtering
-SIMILARITY_THRESHOLD = 0.7  # Minimum similarity score (0-1)
+SIMILARITY_THRESHOLD = 1.5  # lower is better
 MIN_DOCUMENTS = 1  # Minimum documents to return even if below threshold
 MAX_DOCUMENTS = 10  # Maximum documents to retrieve initially
 
@@ -45,17 +45,14 @@ def filter_documents_by_similarity(docs_and_scores: List[Tuple[Document, float]]
     if not docs_and_scores:
         return []
     
-    # Sort by similarity score (higher is better)
-    sorted_docs = sorted(docs_and_scores, key=lambda x: x[1], reverse=True)
-    
-    # Filter by threshold
-    filtered_docs = [(doc, score) for doc, score in sorted_docs if score >= threshold]
-    
-    # If we have too few documents after filtering, include some below threshold
-    if len(filtered_docs) < min_docs and len(sorted_docs) > 0:
-        logger.info(f"[DEBUG] RAG: Only {len(filtered_docs)} documents above threshold {threshold}, including {min_docs - len(filtered_docs)} below threshold")
-        # Include top documents even if below threshold
-        filtered_docs = sorted_docs[:min_docs]
+    # For cosine distance, scores are 0-1 where lower is better (more similar)
+    logger.info(f"[DEBUG] RAG: Using cosine distance filtering (lower is better)")
+    # Filter by <= threshold (lower scores are more similar)
+    filtered_docs = [(doc, score) for doc, score in docs_and_scores if score <= threshold]
+    # If too few documents, include more (take first min_docs)
+    if len(filtered_docs) < min_docs and len(docs_and_scores) > 0:
+        logger.info(f"[DEBUG] RAG: Only {len(filtered_docs)} documents below distance threshold {threshold}, including {min_docs - len(filtered_docs)} more")
+        filtered_docs = docs_and_scores[:min_docs]
     
     logger.info(f"[DEBUG] RAG: Filtered to {len(filtered_docs)} documents (threshold: {threshold})")
     for i, (doc, score) in enumerate(filtered_docs):
