@@ -12,7 +12,6 @@ logger = logging.getLogger(__name__)
 
 # Configuration for RAG filtering
 SIMILARITY_THRESHOLD = 1.5  # lower is better
-MIN_DOCUMENTS = 1  # Minimum documents to return even if below threshold
 MAX_DOCUMENTS = 10  # Maximum documents to retrieve initially
 
 def fetch_documents_with_scores(question, k=MAX_DOCUMENTS) -> List[Tuple[Document, float]]:
@@ -39,8 +38,7 @@ def fetch_documents_with_scores(question, k=MAX_DOCUMENTS) -> List[Tuple[Documen
         return []
 
 def filter_documents_by_similarity(docs_and_scores: List[Tuple[Document, float]], 
-                                 threshold: float = SIMILARITY_THRESHOLD,
-                                 min_docs: int = MIN_DOCUMENTS) -> List[Tuple[Document, float]]:
+                                 threshold: float = SIMILARITY_THRESHOLD) -> List[Tuple[Document, float]]:
     """Filter documents based on similarity threshold"""
     if not docs_and_scores:
         return []
@@ -49,10 +47,6 @@ def filter_documents_by_similarity(docs_and_scores: List[Tuple[Document, float]]
     logger.info(f"[DEBUG] RAG: Using cosine distance filtering (lower is better)")
     # Filter by <= threshold (lower scores are more similar)
     filtered_docs = [(doc, score) for doc, score in docs_and_scores if score <= threshold]
-    # If too few documents, include more (take first min_docs)
-    if len(filtered_docs) < min_docs and len(docs_and_scores) > 0:
-        logger.info(f"[DEBUG] RAG: Only {len(filtered_docs)} documents below distance threshold {threshold}, including {min_docs - len(filtered_docs)} more")
-        filtered_docs = docs_and_scores[:min_docs]
     
     logger.info(f"[DEBUG] RAG: Filtered to {len(filtered_docs)} documents (threshold: {threshold})")
     for i, (doc, score) in enumerate(filtered_docs):
@@ -73,7 +67,7 @@ def fetch_documents(question, k=MAX_DOCUMENTS):
             return "No relevant documents found in knowledge base. Please provide a general answer based on your training data."
         
         # Filter by similarity threshold
-        filtered_docs = filter_documents_by_similarity(docs_and_scores, SIMILARITY_THRESHOLD, MIN_DOCUMENTS)
+        filtered_docs = filter_documents_by_similarity(docs_and_scores, SIMILARITY_THRESHOLD)
         
         if not filtered_docs:
             logger.warning(f"[DEBUG] RAG: No documents met similarity threshold {SIMILARITY_THRESHOLD}")
@@ -112,7 +106,7 @@ def run_rag(question, gemini_client):
             return "No relevant documents found in knowledge base to answer this question."
         
         # Filter by similarity threshold
-        filtered_docs = filter_documents_by_similarity(docs_and_scores, SIMILARITY_THRESHOLD, MIN_DOCUMENTS)
+        filtered_docs = filter_documents_by_similarity(docs_and_scores, SIMILARITY_THRESHOLD)
         
         if not filtered_docs:
             logger.warning(f"[DEBUG] RAG: No documents met similarity threshold {SIMILARITY_THRESHOLD} for QA chain")
