@@ -1,32 +1,29 @@
 # LangChain ChromaDB integration
-import chromadb
-from langchain_community.vectorstores import Chroma
-from langchain_community.embeddings import HuggingFaceEmbeddings
-import os
+import logging
+from utils.database_config import create_vectorstore, should_persist_vectorstore
+
+logger = logging.getLogger(__name__)
 
 def get_chroma_client():
     """Get ChromaDB client for direct access"""
-    return chromadb.Client()
+    from utils.database_config import create_chroma_client
+    return create_chroma_client()
 
 def get_vectorstore():
     """Get LangChain Chroma vectorstore with embeddings"""
-    embeddings = HuggingFaceEmbeddings(
-        model_name="sentence-transformers/all-MiniLM-L6-v2",
-        model_kwargs={'device': 'cpu'}
-    )
-    
-    # Create or load existing vectorstore
-    vectorstore = Chroma(
-        collection_name="knowledge_base",
-        embedding_function=embeddings,
-        persist_directory="./chroma_db"
-    )
-    
-    return vectorstore
+    return create_vectorstore()
 
 def add_documents_to_vectorstore(texts, metadatas=None):
     """Add documents to the vectorstore"""
     vectorstore = get_vectorstore()
     vectorstore.add_texts(texts, metadatas=metadatas)
-    vectorstore.persist()
+    
+    # Only persist if environment supports it
+    if should_persist_vectorstore():
+        try:
+            vectorstore.persist()
+            logger.info("💾 Persisted vectorstore to disk")
+        except Exception as e:
+            logger.warning(f"⚠️ Could not persist vectorstore: {e}")
+    
     return vectorstore 

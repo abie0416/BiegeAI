@@ -9,6 +9,7 @@ from agent.mcp import run_mcp
 from agent.rag import fetch_documents
 from init_knowledge_base import init_knowledge_base
 from conversation_manager import conversation_manager
+from utils.environment import log_environment_info, get_environment_info
 
 # Configure logging with forced output
 logging.basicConfig(
@@ -31,7 +32,7 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 logger.info("🚀 Starting Biege AI Backend...")
 logger.info(f"📋 Environment check:")
 logger.info(f"   - GEMINI_API_KEY: {'✅ Set' if GEMINI_API_KEY else '❌ Not set'}")
-logger.info(f"   - PORT: {os.getenv('PORT', 'Not set')}")
+log_environment_info()
 
 app = FastAPI(title="Biege AI Backend", description="AI Agent with RAG and MCP capabilities")
 
@@ -223,6 +224,7 @@ async def debug_info():
             "max_sessions": conversation_manager.max_sessions,
             "session_timeout_minutes": conversation_manager.session_timeout_minutes
         },
+        "environment": get_environment_info(),
         "endpoints": {
             "root": "/",
             "health": "/health",

@@ -33,7 +33,9 @@ def fetch_documents(question, k=3):
         
     except Exception as e:
         logger.error(f"[DEBUG] RAG Error: {str(e)}")
-        return f"[RAG Error] {str(e)}"
+        # Return a fallback message instead of error
+        logger.info("[DEBUG] RAG: Using fallback context due to error")
+        return "No specific knowledge base context available. Please provide a general answer based on your training data."
 
 def run_rag(question, gemini_client):
     """Run RAG (Retrieval-Augmented Generation) pipeline"""
