@@ -1,13 +1,16 @@
 import os
 import logging
 import sys
+
+# Set protobuf environment variable BEFORE any other imports
+os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 from agent.gemini_client import GeminiClient
 from agent.mcp import run_mcp
-from agent.rag import fetch_documents
-from init_knowledge_base import init_knowledge_base
+from services.advanced_rag_service import get_advanced_rag_service
 from conversation_manager import conversation_manager
 from utils.environment import log_environment_info, get_environment_info
 
@@ -53,24 +56,106 @@ except Exception as e:
     logger.error(f"❌ Failed to initialize Gemini client: {e}")
     gemini_client = None
 
-# Initialize knowledge base with sample data
-try:
-    logger.info("📚 Initializing knowledge base...")
-    init_knowledge_base()
-    logger.info("✅ Knowledge base initialized successfully")
-except Exception as e:
-    logger.error(f"❌ Failed to initialize knowledge base: {e}")
+def initialize_rag_knowledge_base():
+    """Initialize RAG knowledge base on startup"""
+    try:
+        logger.info("🚀 Initializing RAG knowledge base...")
+        
+        if not GEMINI_API_KEY:
+            logger.warning("⚠️ GEMINI_API_KEY not set, skipping RAG initialization")
+            return False
+        
+        # Get documents from Google Sheets with fallback
+        documents = get_documents_from_sheets_with_fallback()
+        
+        if not documents:
+            logger.warning("⚠️ No documents available for RAG initialization")
+            return False
+        
+        # Get advanced RAG service
+        advanced_rag = get_advanced_rag_service(GEMINI_API_KEY)
+        
+        # Build advanced index
+        success = advanced_rag.build_advanced_index(documents)
+        
+        if success:
+            logger.info(f"✅ RAG knowledge base initialized successfully with {len(documents)} documents")
+            return True
+        else:
+            logger.error("❌ Failed to initialize RAG knowledge base")
+            return False
+            
+    except Exception as e:
+        logger.error(f"❌ Error initializing RAG knowledge base: {e}")
+        return False
+
+# Initialize RAG knowledge base on startup
+rag_initialized = initialize_rag_knowledge_base()
+
+
+
+def get_documents_from_sheets_with_fallback():
+    """Get documents from Google Sheets with fallback to hardcoded documents"""
+    fallback_documents = [
+        "Eric是O孝子，他非常孝顺父母，经常帮助家里做家务。Eric在朋友中很受欢迎，大家都喜欢和他一起玩。",
+        "Eric投篮还可以，但是没有zzn准。Eric在篮球场上表现不错，但是zzn的投篮技术更加精准，命中率更高。",
+        "911比718牛逼，保时捷911是经典跑车，性能卓越。718虽然也不错，但在很多方面都不如911出色。",
+        "马棚是老司机，开车技术很好，经验丰富。他经常开车带大家出去玩，大家都觉得坐他的车很安全。",
+        "Final全能王，在游戏Final中表现非常出色，各种角色都能玩得很好。他是大家公认的游戏高手。",
+        "小瘦哥玩鸟狙很厉害，在射击游戏中特别擅长使用狙击枪。他的瞄准技术非常精准，经常能一枪爆头。",
+        "段神是道具王，在游戏中特别擅长使用各种道具。他对游戏道具的理解很深，总能找到最有效的使用方法。",
+        "吴非是亚马逊AI王，在亚马逊工作，专门负责AI相关项目。他在人工智能领域很有经验，技术能力很强。",
+        "abie就是憋哥，这是他的外号。abie性格比较内向，不太爱说话，所以大家叫他憋哥。",
+        "憋哥牛逼，虽然abie比较内向，但是他的能力很强，在很多方面都很出色，大家都很佩服他。",
+    ]
+    
+    try:
+        from services.google_sheets import sheets_service
+        sheets_docs = sheets_service.get_documents()
+        if sheets_docs:
+            # Extract content from documents
+            documents = [doc.get('content', '') for doc in sheets_docs if doc.get('content')]
+            logger.info(f"✅ Successfully fetched {len(documents)} documents from Google Sheets")
+            return documents
+        else:
+            logger.warning("⚠️ No documents found in Google Sheets, using fallback data")
+            return fallback_documents
+    except Exception as e:
+        logger.warning(f"⚠️ Could not fetch from Google Sheets: {e}, using fallback data")
+        return fallback_documents
 
 def get_rag_context(question: str) -> str:
-    """Always fetch RAG context for the question"""
+    """Always fetch RAG context for the question using advanced RAG service"""
     try:
-        logger.info("🔍 Fetching RAG context...")
-        rag_context = fetch_documents(question)
-        logger.info(f"✅ RAG context fetched: {len(rag_context)} characters")
-        return rag_context
+        logger.info("🔍 Fetching RAG context with advanced service...")
+        
+        if not GEMINI_API_KEY:
+            logger.warning("⚠️ GEMINI_API_KEY not set, cannot use advanced RAG")
+            return "Advanced RAG not available - API key not configured."
+        
+        # Get advanced RAG service
+        advanced_rag = get_advanced_rag_service(GEMINI_API_KEY)
+        
+        # Get contextual documents with compression
+        documents = advanced_rag.query_with_contextual_compression(question, k=5)
+        
+        if not documents:
+            logger.warning("⚠️ No documents retrieved from advanced RAG")
+            return "No relevant documents found in knowledge base."
+        
+        # Format documents into context
+        context_parts = []
+        for i, doc in enumerate(documents):
+            score_info = f" (relevance: {doc['score']:.3f})" if doc['score'] is not None else ""
+            context_parts.append(f"Document {i+1}{score_info}:\n{doc['content']}")
+        
+        context = "\n\n".join(context_parts)
+        logger.info(f"✅ Advanced RAG context fetched: {len(context)} characters from {len(documents)} documents")
+        return context
+        
     except Exception as e:
-        logger.error(f"❌ RAG context fetch failed: {e}")
-        return f"RAG Error: {str(e)}"
+        logger.error(f"❌ Advanced RAG context fetch failed: {e}")
+        return f"Advanced RAG Error: {str(e)}"
 
 @app.get("/")
 async def root():
@@ -81,6 +166,7 @@ async def root():
         "debug": {
             "api_key_configured": GEMINI_API_KEY is not None,
             "gemini_client_ready": gemini_client is not None,
+            "rag_initialized": rag_initialized,
             "port": os.getenv("PORT", "Not set"),
             "environment": "production" if os.getenv("RAILWAY_ENVIRONMENT") else "development"
         },
@@ -199,6 +285,7 @@ async def health_check():
         "debug": {
             "api_key_configured": GEMINI_API_KEY is not None,
             "gemini_client_ready": gemini_client is not None,
+            "rag_initialized": rag_initialized,
             "port": os.getenv("PORT", "Not set"),
             "environment": "production" if os.getenv("RAILWAY_ENVIRONMENT") else "development"
         }
@@ -217,7 +304,8 @@ async def debug_info():
             "RAILWAY_ENVIRONMENT": os.getenv("RAILWAY_ENVIRONMENT", "Not set")
         },
         "services": {
-            "gemini_client": "Ready" if gemini_client else "Not ready"
+            "gemini_client": "Ready" if gemini_client else "Not ready",
+            "rag_knowledge_base": "Initialized" if rag_initialized else "Not initialized"
         },
         "conversation_manager": {
             "total_sessions": len(conversation_manager.sessions),
@@ -233,7 +321,7 @@ async def debug_info():
             "test_logs": "/test-logs",
             "conversations": "/conversations (GET)",
             "conversation_stats": "/conversation-stats (GET)",
-            "rebuild_rag": "/rebuild-rag (POST)"
+            "rebuild_rag": "/rebuild-rag (POST) - rebuilds Advanced RAG knowledge base"
         }
     }
 
@@ -258,50 +346,104 @@ async def get_conversation_stats():
 
 @app.post("/rebuild-rag")
 async def rebuild_rag():
-    """Rebuild RAG knowledge base and return number of successfully embedded documents"""
+    """Rebuild Advanced RAG knowledge base and return results"""
     logger.info("📥 Rebuild RAG endpoint accessed")
     
     try:
-        from init_knowledge_base import init_knowledge_base, sample_documents
+        # Ensure environment variables are loaded
+        from dotenv import load_dotenv
+        load_dotenv()
+        
+        # Get documents from Google Sheets with fallback
+        documents = get_documents_from_sheets_with_fallback()
         from db.chroma_client import get_vectorstore
         
-        # Clear existing vectorstore
-        logger.info("🗑️ Clearing existing vectorstore...")
-        vectorstore = get_vectorstore()
-        try:
-            collection = vectorstore._collection
-            collection.delete(where={})
-            logger.info("✅ Existing documents cleared")
-        except Exception as e:
-            logger.warning(f"⚠️ Could not clear existing collection: {e}")
+        total_documents = len(documents)
         
-        # Rebuild knowledge base
-        logger.info("🔨 Rebuilding knowledge base...")
-        init_knowledge_base()
+        # Initialize results
+        results = {
+            "advanced_rag": {"success": False, "documents_embedded": 0}
+        }
         
-        # Verify the rebuild by counting documents
+        # Rebuild Advanced RAG
+        logger.info("🔨 Rebuilding Advanced RAG knowledge base...")
         try:
-            collection = vectorstore._collection
-            count = collection.count()
-            logger.info(f"✅ Rebuild completed successfully. {count} documents embedded and stored.")
-            
-            return {
-                "success": True,
-                "message": f"RAG knowledge base rebuilt successfully",
-                "documents_embedded": count,
-                "total_sample_documents": len(sample_documents),
-                "details": f"Successfully embedded and stored {count} document chunks from {len(sample_documents)} sample documents"
-            }
-            
+            if not GEMINI_API_KEY:
+                logger.warning("⚠️ GEMINI_API_KEY not set, skipping Advanced RAG rebuild")
+                results["advanced_rag"] = {"success": False, "documents_embedded": 0, "error": "GEMINI_API_KEY not configured"}
+            else:
+                # Clear existing vectorstore completely
+                logger.info("🗑️ Clearing existing vectorstore completely...")
+                try:
+                    import chromadb
+                    import time
+                    # Use in-memory client for consistency
+                    client = chromadb.Client()
+                    
+                    # Check if collection exists before deleting
+                    try:
+                        existing_collection = client.get_collection("knowledge_base")
+                        logger.info("🗑️ Found existing collection, deleting...")
+                        client.delete_collection("knowledge_base")
+                        logger.info("✅ Existing collection deleted completely")
+                    except:
+                        logger.info("ℹ️ No existing collection found, will create new one")
+                    
+                    # Small delay to ensure deletion is complete
+                    time.sleep(1)
+                except Exception as e:
+                    logger.warning(f"⚠️ Could not delete existing collection: {e}")
+                
+                # Get advanced RAG service
+                advanced_rag = get_advanced_rag_service(GEMINI_API_KEY)
+                
+                # Build advanced index
+                success = advanced_rag.build_advanced_index(documents)
+                
+                if success:
+                    # Verify rebuild by counting documents
+                    try:
+                        # Get fresh vectorstore to count documents
+                        fresh_vectorstore = get_vectorstore()
+                        collection = fresh_vectorstore._collection
+                        count = collection.count()
+                        results["advanced_rag"] = {"success": True, "documents_embedded": count}
+                        logger.info(f"✅ Advanced RAG rebuild completed successfully. {count} documents embedded.")
+                        
+                        # Update global RAG status
+                        global rag_initialized
+                        rag_initialized = True
+                        
+                    except Exception as e:
+                        logger.error(f"❌ Error counting documents after rebuild: {e}")
+                        results["advanced_rag"] = {"success": False, "documents_embedded": 0, "error": str(e)}
+                else:
+                    results["advanced_rag"] = {"success": False, "documents_embedded": 0, "error": "Advanced RAG build process failed"}
+                    
         except Exception as e:
-            logger.error(f"❌ Error counting documents after rebuild: {e}")
-            return {
-                "success": False,
-                "message": f"Rebuild completed but could not verify document count: {str(e)}",
-                "documents_embedded": "unknown",
-                "total_sample_documents": len(sample_documents),
-                "error": str(e)
-            }
+            logger.error(f"❌ Error rebuilding Advanced RAG: {e}")
+            results["advanced_rag"] = {"success": False, "documents_embedded": 0, "error": str(e)}
+        
+        # Prepare response
+        advanced_rag_success = results["advanced_rag"]["success"]
+        advanced_rag_count = results["advanced_rag"]["documents_embedded"]
+        
+        # Create detailed message
+        if advanced_rag_success:
+            details = f"Successfully rebuilt Advanced RAG: {advanced_rag_count} chunks with AI metadata from {total_documents} documents"
+        else:
+            details = f"Advanced RAG rebuild failed"
+            if "error" in results["advanced_rag"]:
+                details += f": {results['advanced_rag']['error']}"
+        
+        return {
+            "success": advanced_rag_success,
+            "message": f"Advanced RAG knowledge base rebuild {'completed' if advanced_rag_success else 'failed'}",
+            "documents_embedded": advanced_rag_count,
+            "total_sample_documents": total_documents,
+            "details": details,
+            "advanced_rag": results["advanced_rag"]
+        }
             
     except Exception as e:
         error_msg = f"❌ Error rebuilding RAG knowledge base: {str(e)}"
@@ -310,6 +452,10 @@ async def rebuild_rag():
             "success": False,
             "message": error_msg,
             "documents_embedded": 0,
-            "total_sample_documents": len(sample_documents) if 'sample_documents' in locals() else "unknown",
+            "total_sample_documents": "unknown",
             "error": str(e)
-        } 
+        }
+
+
+
+ 

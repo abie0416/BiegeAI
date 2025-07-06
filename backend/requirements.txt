@@ -5,5 +5,5 @@ python-dotenv
 langchain
 langchain-google-genai
 langchain-community
-sentence-transformers
-torch 
+google-api-python-client
+google-auth-httplib2 
