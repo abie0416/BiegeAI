@@ -21,6 +21,8 @@ from llama_index.core.retrievers import VectorIndexRetriever
 from llama_index.core.query_engine import RetrieverQueryEngine
 from llama_index.core.llms import LLM
 from agent.gemini_client import GeminiClient
+from services.document_preprocessor import DocumentPreprocessor
+from concurrent.futures import ThreadPoolExecutor
 
 # Get logger for this module
 logger = logging.getLogger(__name__)
@@ -131,6 +133,7 @@ class LlamaIndexGraphRAGService:
         self.retriever = None
         self.query_engine = None
         self.storage_context = None
+        self.document_preprocessor = DocumentPreprocessor(google_api_key)
         
     def setup_components(self):
         """Setup LlamaIndex GraphRAG components"""
@@ -170,7 +173,7 @@ class LlamaIndexGraphRAGService:
             print("Exception details:", e)  # Print exception details
             return False
     
-    def build_knowledge_graph(self, documents: List[str]):
+    def build_knowledge_graph(self, documents: List[Dict]):
         """Build knowledge graph using LlamaIndex with entity extraction"""
         try:
             logger.info("🔨 Building LlamaIndex knowledge graph...")
@@ -179,19 +182,32 @@ class LlamaIndexGraphRAGService:
             if not self.setup_components():
                 raise Exception("Failed to setup components")
             
-            # Convert documents to LlamaIndex Document objects
-            llama_docs = []
-            for i, content in enumerate(documents):
+            # Preprocess documents using AI
+            logger.info("🧹 Preprocessing documents with AI...")
+            preprocessed_docs = self.document_preprocessor.preprocess_documents(documents)
+            
+            # Parallelize conversion to LlamaIndex Document objects
+            def to_llama_doc(args):
+                i, doc = args
+                content = doc.get('content', '')
                 if content.strip():
-                    doc = Document(
+                    doc_metadata = {
+                        "source": "google_sheets",
+                        "document_id": i,
+                        "content_length": len(content),
+                        "original_length": doc.get('original_length', len(content)),
+                        "processed_length": doc.get('processed_length', len(content)),
+                        "compression_ratio": doc.get('compression_ratio', 1.0),
+                        "preprocessed": True
+                    }
+                    return Document(
                         text=content.strip(),
-                        metadata={
-                            "source": "google_sheets",
-                            "document_id": i,
-                            "content_length": len(content)
-                        }
+                        metadata=doc_metadata
                     )
-                    llama_docs.append(doc)
+                return None
+            with ThreadPoolExecutor(max_workers=8) as executor:
+                llama_docs = list(executor.map(to_llama_doc, enumerate(preprocessed_docs)))
+            llama_docs = [doc for doc in llama_docs if doc]
             
             if not llama_docs:
                 raise Exception("No valid documents to process")
