@@ -11,7 +11,14 @@ from dotenv import load_dotenv
 from agent.gemini_client import GeminiClient
 from agent.mcp import run_mcp
 
-from services.llamaindex_graphrag_service import get_llamaindex_graphrag_service
+try:
+    from services.llamaindex_graphrag_service import get_llamaindex_graphrag_service
+except ImportError:
+    # Fallback for Railway deployment
+    import sys
+    import os
+    sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+    from services.llamaindex_graphrag_service import get_llamaindex_graphrag_service
 from conversation_manager import conversation_manager
 from utils.environment import log_environment_info, get_environment_info
 

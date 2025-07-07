@@ -1,5 +1,6 @@
 """
 LlamaIndex GraphRAG service using optimized graph-based retrieval
+Updated for Railway deployment
 """
 import logging
 import os
