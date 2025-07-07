@@ -135,6 +135,8 @@ IMPORTANT: Do not use the same tool consecutively. If you just used a tool, use 
 
 To provide a final answer without using more tools, respond normally with your answer.
 
+IMPORTANT: Always respond in the same language as the user's question. If they ask in Chinese, respond in Chinese. If they ask in English, respond in English. If they ask in any other language, respond in that same language.
+
 When you have relevant context from the knowledge base, use it to provide accurate answers.
 """
             
@@ -237,7 +239,9 @@ When you have relevant context from the knowledge base, use it to provide accura
 
 {tool_results_summary}
 
-Synthesize all the information gathered from the tools to provide a complete and accurate answer."""
+IMPORTANT: Respond in the same language as the original question. If the question was asked in Chinese, respond in Chinese. If the question was asked in English, respond in English. If the question was asked in any other language, respond in that same language.
+
+Synthesize all the information gathered from the tools to provide a complete and accurate answer in the appropriate language."""
                 
                 full_context = f"{conversation_context}\n{tool_results_summary}\n\n{final_prompt}"
                 final_response = self.gemini_client.generate(question, full_context)
