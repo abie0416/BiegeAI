@@ -1,9 +1,9 @@
 fastapi
 uvicorn
-chromadb
 python-dotenv
 langchain
-langchain-google-genai
-langchain-community
 google-api-python-client
-google-auth-httplib2 
+google-auth-httplib2
+pydantic
+llama-index
+llama-index-embeddings-google 

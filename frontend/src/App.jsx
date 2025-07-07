@@ -179,6 +179,8 @@ function App() {
     }
   };
 
+
+
   // Test connection on component mount
   useEffect(() => {
     logDebug("🚀 Frontend initialized", {
@@ -430,8 +432,9 @@ function App() {
                 cursor: rebuildLoading ? "not-allowed" : "pointer"
               }}
             >
-              {rebuildLoading ? "🔨 Rebuilding..." : "🔨 Rebuild RAG"}
+              {rebuildLoading ? "🔨 Rebuilding..." : "🔨 Rebuild GraphRAG"}
             </button>
+
           </div>
           
           {/* Rebuild Result Display */}
@@ -451,7 +454,7 @@ function App() {
               <div>{rebuildResult.message}</div>
               {rebuildResult.documents_embedded !== undefined && (
                 <div style={{ marginTop: "4px" }}>
-                  📄 Documents: {rebuildResult.documents_embedded} / {rebuildResult.total_sample_documents}
+                  📄 Total Documents: {rebuildResult.documents_embedded} / {rebuildResult.total_sample_documents}
                 </div>
               )}
               {rebuildResult.details && (
@@ -459,6 +462,8 @@ function App() {
                   {rebuildResult.details}
                 </div>
               )}
+
+
               {rebuildResult.error && (
                 <div style={{ marginTop: "4px", fontSize: "0.8rem", opacity: 0.8 }}>
                   Error: {rebuildResult.error}
@@ -466,6 +471,8 @@ function App() {
               )}
             </div>
           )}
+          
+
         </div>
       </div>
 

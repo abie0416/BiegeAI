@@ -48,6 +48,12 @@ frontend/dist/
 
 # ChromaDB
 backend/chroma_db/
+
+# Google Sheets credentials
+backend/credentials.json
+backend/service-account-key.json
+backend/google_sheets_service_account.json
+backend/token.json
 backend/chroma_db_old/
 
 # IDE

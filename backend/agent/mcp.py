@@ -53,7 +53,6 @@ class MCPClient:
     def register_tool(self, tool: MCPTool):
         """Register a new tool with the MCP client"""
         self.context.tools.append(tool)
-        logger.info(f"[DEBUG] MCP: Registered tool: {tool.name}")
     
     def add_message(self, message: BaseMessage):
         """Add a message to the conversation context"""
@@ -167,15 +166,21 @@ When you have relevant context from the knowledge base, use it to provide accura
                         if "tool" in tool_call and "arguments" in tool_call:
                             tool_name = tool_call["tool"]
                             
+                            # Log tool usage decision
+                            logger.info(f"🔧 Model decided to use tool: {tool_name}")
+                            logger.info(f"   - Arguments: {tool_call['arguments']}")
+                            
                             # Check for consecutive duplicate tool usage
                             if tool_name == last_used_tool:
-                                logger.warning(f"[DEBUG] MCP: Preventing consecutive duplicate tool usage: {tool_name}")
+                                logger.warning(f"⚠️ Preventing consecutive duplicate tool usage: {tool_name}")
                                 # Add warning to system prompt and continue
                                 system_prompt += f"\n\n⚠️ WARNING: Tool '{tool_name}' was just used. Please use a different tool or provide a final answer based on the previous result."
                                 continue
                             
                             # Execute the tool
                             tool_result = self.execute_tool(tool_name, tool_call["arguments"])
+                            logger.info(f"✅ Tool execution result: {tool_result[:200]}...")
+                            
                             all_tool_results.append({
                                 "tool": tool_name,
                                 "arguments": tool_call["arguments"],
@@ -194,10 +199,17 @@ When you have relevant context from the knowledge base, use it to provide accura
                             system_prompt += f"\n\nTool execution result: {tool_result}\n\nYou can use this result to decide whether to use another tool or provide a final answer. Remember: Do not use the same tool consecutively."
                             
                             tool_calls_made += 1
-                            logger.info(f"[DEBUG] MCP: Tool call {tool_calls_made}: {tool_name}")
                             continue
                     
-                    # If no tool call detected, generate final response
+                    # If no tool call detected, log that model decided not to use tools
+                    if tool_calls_made == 0:
+                        logger.info(f"🤖 Model decided not to use any tools - providing direct answer")
+                        logger.info(f"   - Response preview: {response[:200]}...")
+                    else:
+                        logger.info(f"🤖 Model decided to stop using tools after {tool_calls_made} tool calls")
+                        logger.info(f"   - Final response preview: {response[:200]}...")
+                    
+                    # Generate final response
                     break
                     
                 except (json.JSONDecodeError, KeyError):
@@ -206,6 +218,8 @@ When you have relevant context from the knowledge base, use it to provide accura
             
             # Generate final response with all tool results
             if all_tool_results:
+                logger.info(f"📝 Generating final response using {len(all_tool_results)} tool results")
+                
                 # Build comprehensive context with all tool results
                 conversation_context = ""
                 for msg in self.context.messages:
@@ -231,9 +245,11 @@ Synthesize all the information gathered from the tools to provide a complete and
                 # Add final response to context
                 self.add_message(SystemMessage(content=final_response))
                 
+                logger.info(f"✅ Final response generated using tool results")
                 return final_response
             else:
                 # No tools were used, return the original response
+                logger.info(f"✅ Returning direct response (no tools used)")
                 self.add_message(HumanMessage(content=question))
                 self.add_message(SystemMessage(content=response))
                 return response
@@ -245,18 +261,18 @@ Synthesize all the information gathered from the tools to provide a complete and
 def run_mcp(question: str, gemini_client, rag_context: Optional[str] = None) -> str:
     """Run Model Context Protocol with the given question and optional RAG context"""
     try:
-        logger.info(f"[DEBUG] MCP: Starting with question: {question}")
+        logger.info(f"🚀 Starting MCP execution for question: {question}")
         
         # Initialize MCP client
         mcp_client = MCPClient(gemini_client)
-        logger.info(f"[DEBUG] MCP: Initialized MCP client with {len(mcp_client.context.tools)} tools")
+        logger.info(f"🔧 MCP client initialized with {len(mcp_client.context.tools)} available tools")
         
         # Run with context
         result = mcp_client.run_with_context(question, rag_context)
-        logger.info(f"[DEBUG] MCP: Execution completed")
+        logger.info(f"✅ MCP execution completed successfully")
         
         return result
         
     except Exception as e:
-        logger.error(f"[DEBUG] MCP Error: {str(e)}")
+        logger.error(f"❌ MCP Error: {str(e)}")
         return f"[MCP Error] {str(e)}" 

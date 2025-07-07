@@ -10,7 +10,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 from agent.gemini_client import GeminiClient
 from agent.mcp import run_mcp
-from services.advanced_rag_service import get_advanced_rag_service
+
+from services.llamaindex_graphrag_service import get_llamaindex_graphrag_service
 from conversation_manager import conversation_manager
 from utils.environment import log_environment_info, get_environment_info
 
@@ -23,6 +24,13 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger(__name__)
+
+# Suppress verbose LlamaIndex debug logs
+logging.getLogger("llama_index.core.node_parser.node_utils").setLevel(logging.WARNING)
+logging.getLogger("llama_index.core.indices.knowledge_graph.base").setLevel(logging.WARNING)
+logging.getLogger("llama_index.core.indices.vector_store.base").setLevel(logging.WARNING)
+logging.getLogger("llama_index.core.retrievers").setLevel(logging.WARNING)
+logging.getLogger("llama_index.core.query_engine").setLevel(logging.WARNING)
 
 # Force stdout to flush immediately
 sys.stdout.flush()
@@ -102,14 +110,20 @@ def initialize_rag_knowledge_base():
             logger.warning("⚠️ No documents available for RAG initialization")
             return False
         
-        # Get advanced RAG service
-        advanced_rag = get_advanced_rag_service(GEMINI_API_KEY)
+        # Initialize LlamaIndex GraphRAG
+        success_llamaindex = False
         
-        # Build advanced index
-        success = advanced_rag.build_advanced_index(documents)
+        # Try LlamaIndex GraphRAG
+        try:
+            llamaindex_graphrag = get_llamaindex_graphrag_service(GEMINI_API_KEY)
+            success_llamaindex = llamaindex_graphrag.build_knowledge_graph(documents)
+            if success_llamaindex:
+                logger.info("✅ LlamaIndex GraphRAG knowledge base initialized successfully")
+        except Exception as e:
+            logger.error(f"❌ LlamaIndex GraphRAG initialization failed: {e}")
         
-        if success:
-            logger.info(f"✅ RAG knowledge base initialized successfully with {len(documents)} documents")
+        if success_llamaindex:
+            logger.info(f"✅ RAG knowledge base initialized with {len(documents)} documents")
             return True
         else:
             logger.error("❌ Failed to initialize RAG knowledge base")
@@ -123,37 +137,49 @@ def initialize_rag_knowledge_base():
 rag_initialized = initialize_rag_knowledge_base()
 
 def get_rag_context(question: str) -> str:
-    """Always fetch RAG context for the question using advanced RAG service"""
+    """Fetch RAG context using GraphRAG"""
     try:
-        logger.info("🔍 Fetching RAG context with advanced service...")
+        logger.info("🔍 Fetching RAG context with GraphRAG...")
         
         if not GEMINI_API_KEY:
-            logger.warning("⚠️ GEMINI_API_KEY not set, cannot use advanced RAG")
-            return "Advanced RAG not available - API key not configured."
+            logger.warning("⚠️ GEMINI_API_KEY not set, cannot use RAG")
+            return "RAG not available - API key not configured."
         
-        # Get advanced RAG service
-        advanced_rag = get_advanced_rag_service(GEMINI_API_KEY)
+        # Use LlamaIndex GraphRAG
+        try:
+            llamaindex_graphrag = get_llamaindex_graphrag_service(GEMINI_API_KEY)
+            documents = llamaindex_graphrag.hybrid_search(question, k=5)
+            
+            if documents:
+                # Format documents into context
+                context_parts = []
+                logger.info(f"📚 Formatting {len(documents)} retrieved documents into context:")
+                
+                for i, doc in enumerate(documents):
+                    source_info = f" ({doc['source']})" if 'source' in doc else ""
+                    score_info = f" (relevance: {doc['score']:.3f})" if doc['score'] is not None else ""
+                    context_parts.append(f"Document {i+1}{source_info}{score_info}:\n{doc['content']}")
+                    
+                    # Log each document being added to context
+                    logger.info(f"   📄 Document {i+1}:")
+                    logger.info(f"      - Source: {doc.get('source', 'unknown')}")
+                    logger.info(f"      - Score: {doc.get('score', 'N/A')}")
+                    logger.info(f"      - Content length: {len(doc['content'])} characters")
+                    logger.info(f"      - Content preview: {doc['content'][:200]}...")
+                
+                context = "\n\n".join(context_parts)
+                logger.info(f"✅ GraphRAG context fetched: {len(context)} characters from {len(documents)} documents")
+                logger.info(f"📋 Final context preview: {context[:300]}...")
+                return context
+        except Exception as e:
+            logger.error(f"❌ LlamaIndex GraphRAG failed: {e}")
         
-        # Get contextual documents with compression
-        documents = advanced_rag.query_with_contextual_compression(question, k=5)
-        
-        if not documents:
-            logger.warning("⚠️ No documents retrieved from advanced RAG")
-            return "No relevant documents found in knowledge base."
-        
-        # Format documents into context
-        context_parts = []
-        for i, doc in enumerate(documents):
-            score_info = f" (relevance: {doc['score']:.3f})" if doc['score'] is not None else ""
-            context_parts.append(f"Document {i+1}{score_info}:\n{doc['content']}")
-        
-        context = "\n\n".join(context_parts)
-        logger.info(f"✅ Advanced RAG context fetched: {len(context)} characters from {len(documents)} documents")
-        return context
+        logger.warning("⚠️ No documents retrieved from RAG system")
+        return "No relevant documents found in knowledge base."
         
     except Exception as e:
-        logger.error(f"❌ Advanced RAG context fetch failed: {e}")
-        return f"Advanced RAG Error: {str(e)}"
+        logger.error(f"❌ RAG context fetch failed: {e}")
+        return f"RAG Error: {str(e)}"
 
 @app.get("/")
 async def root():
@@ -226,6 +252,14 @@ async def ask(request: Request):
             combined_context += f"Previous conversation:\n{conversation_context}\n\n"
         if rag_context:
             combined_context += f"Relevant knowledge:\n{rag_context}\n\n"
+        
+        # Log the combined context being sent to the model
+        logger.info(f"📤 Sending combined context to model:")
+        logger.info(f"   - Question: {question}")
+        logger.info(f"   - Conversation context length: {len(conversation_context)} characters")
+        logger.info(f"   - RAG context length: {len(rag_context)} characters")
+        logger.info(f"   - Combined context length: {len(combined_context)} characters")
+        logger.info(f"   - Combined context preview: {combined_context[:500]}...")
         
         # Step 5: Run MCP with combined context
         try:
@@ -344,7 +378,7 @@ async def get_conversation_stats():
 
 @app.post("/rebuild-rag")
 async def rebuild_rag():
-    """Rebuild Advanced RAG knowledge base and return results"""
+    """Rebuild RAG knowledge base (both Advanced RAG and GraphRAG) and return results"""
     logger.info("📥 Rebuild RAG endpoint accessed")
     
     try:
@@ -354,93 +388,73 @@ async def rebuild_rag():
         
         # Get documents from Google Sheets with fallback
         documents = get_documents_from_sheets_with_fallback()
-        from db.chroma_client import get_vectorstore
+
         
         total_documents = len(documents)
         
         # Initialize results
         results = {
-            "advanced_rag": {"success": False, "documents_embedded": 0}
+            "llamaindex_graphrag": {"success": False, "nodes_created": 0, "edges_created": 0}
         }
         
-        # Rebuild Advanced RAG
-        logger.info("🔨 Rebuilding Advanced RAG knowledge base...")
+
+        
+
+        
+        # Rebuild LlamaIndex GraphRAG
+        logger.info("🔨 Rebuilding LlamaIndex GraphRAG knowledge base...")
         try:
             if not GEMINI_API_KEY:
-                logger.warning("⚠️ GEMINI_API_KEY not set, skipping Advanced RAG rebuild")
-                results["advanced_rag"] = {"success": False, "documents_embedded": 0, "error": "GEMINI_API_KEY not configured"}
+                logger.warning("⚠️ GEMINI_API_KEY not set, skipping LlamaIndex GraphRAG rebuild")
+                results["llamaindex_graphrag"] = {"success": False, "nodes_created": 0, "edges_created": 0, "error": "GEMINI_API_KEY not configured"}
             else:
-                # Clear existing vectorstore completely
-                logger.info("🗑️ Clearing existing vectorstore completely...")
-                try:
-                    import chromadb
-                    import time
-                    # Use in-memory client for consistency
-                    client = chromadb.Client()
-                    
-                    # Check if collection exists before deleting
-                    try:
-                        existing_collection = client.get_collection("knowledge_base")
-                        logger.info("🗑️ Found existing collection, deleting...")
-                        client.delete_collection("knowledge_base")
-                        logger.info("✅ Existing collection deleted completely")
-                    except:
-                        logger.info("ℹ️ No existing collection found, will create new one")
-                    
-                    # Small delay to ensure deletion is complete
-                    time.sleep(1)
-                except Exception as e:
-                    logger.warning(f"⚠️ Could not delete existing collection: {e}")
+                # Get LlamaIndex GraphRAG service
+                llamaindex_graphrag = get_llamaindex_graphrag_service(GEMINI_API_KEY)
                 
-                # Get advanced RAG service
-                advanced_rag = get_advanced_rag_service(GEMINI_API_KEY)
-                
-                # Build advanced index
-                success = advanced_rag.build_advanced_index(documents)
+                # Build knowledge graph
+                success = llamaindex_graphrag.build_knowledge_graph(documents)
                 
                 if success:
-                    # Verify rebuild by counting documents
-                    try:
-                        # Get fresh vectorstore to count documents
-                        fresh_vectorstore = get_vectorstore()
-                        collection = fresh_vectorstore._collection
-                        count = collection.count()
-                        results["advanced_rag"] = {"success": True, "documents_embedded": count}
-                        logger.info(f"✅ Advanced RAG rebuild completed successfully. {count} documents embedded.")
-                        
-                        # Update global RAG status
-                        global rag_initialized
-                        rag_initialized = True
-                        
-                    except Exception as e:
-                        logger.error(f"❌ Error counting documents after rebuild: {e}")
-                        results["advanced_rag"] = {"success": False, "documents_embedded": 0, "error": str(e)}
+                    # Get graph statistics
+                    stats = llamaindex_graphrag.get_graph_statistics()
+                    results["llamaindex_graphrag"] = {
+                        "success": True, 
+                        "nodes_created": stats.get("total_nodes", 0),
+                        "edges_created": stats.get("total_edges", 0),
+                        "node_types": stats.get("node_types", {}),
+                        "relationship_types": stats.get("relationship_types", {})
+                    }
+                    logger.info(f"✅ LlamaIndex GraphRAG rebuild completed successfully. {stats.get('total_nodes', 0)} nodes, {stats.get('total_edges', 0)} edges.")
                 else:
-                    results["advanced_rag"] = {"success": False, "documents_embedded": 0, "error": "Advanced RAG build process failed"}
+                    results["llamaindex_graphrag"] = {"success": False, "nodes_created": 0, "edges_created": 0, "error": "LlamaIndex GraphRAG build process failed"}
                     
         except Exception as e:
-            logger.error(f"❌ Error rebuilding Advanced RAG: {e}")
-            results["advanced_rag"] = {"success": False, "documents_embedded": 0, "error": str(e)}
+            logger.error(f"❌ Error rebuilding LlamaIndex GraphRAG: {e}")
+            results["llamaindex_graphrag"] = {"success": False, "nodes_created": 0, "edges_created": 0, "error": str(e)}
+        
+        # Update global RAG status
+        global rag_initialized
+        rag_initialized = results["llamaindex_graphrag"]["success"]
         
         # Prepare response
-        advanced_rag_success = results["advanced_rag"]["success"]
-        advanced_rag_count = results["advanced_rag"]["documents_embedded"]
+        llamaindex_success = results["llamaindex_graphrag"]["success"]
         
         # Create detailed message
-        if advanced_rag_success:
-            details = f"Successfully rebuilt Advanced RAG: {advanced_rag_count} chunks with AI metadata from {total_documents} documents"
+        details_parts = []
+        if llamaindex_success:
+            details_parts.append(f"LlamaIndex GraphRAG: {results['llamaindex_graphrag']['nodes_created']} nodes, {results['llamaindex_graphrag']['edges_created']} edges")
+        
+        if details_parts:
+            details = f"Successfully rebuilt: {'; '.join(details_parts)} from {total_documents} source documents"
         else:
-            details = f"Advanced RAG rebuild failed"
-            if "error" in results["advanced_rag"]:
-                details += f": {results['advanced_rag']['error']}"
+            details = "RAG rebuild failed"
         
         return {
-            "success": advanced_rag_success,
-            "message": f"Advanced RAG knowledge base rebuild {'completed' if advanced_rag_success else 'failed'}",
-            "documents_embedded": advanced_rag_count,
+            "success": llamaindex_success,
+            "message": f"RAG knowledge base rebuild {'completed' if llamaindex_success else 'failed'}",
             "total_sample_documents": total_documents,
             "details": details,
-            "advanced_rag": results["advanced_rag"]
+            "llamaindex_graphrag": results["llamaindex_graphrag"]
         }
             
     except Exception as e:
@@ -449,8 +463,65 @@ async def rebuild_rag():
         return {
             "success": False,
             "message": error_msg,
-            "documents_embedded": 0,
             "total_sample_documents": "unknown",
+            "error": str(e)
+        }
+
+@app.get("/llamaindex-graph-stats")
+async def get_llamaindex_graph_stats():
+    """Get LlamaIndex GraphRAG knowledge graph statistics"""
+    logger.info("📥 LlamaIndex Graph stats endpoint accessed")
+    
+    try:
+        if not GEMINI_API_KEY:
+            return {"error": "GEMINI_API_KEY not configured"}
+        
+        llamaindex_graphrag = get_llamaindex_graphrag_service(GEMINI_API_KEY)
+        stats = llamaindex_graphrag.get_graph_statistics()
+        
+        return {
+            "success": True,
+            "graph_statistics": stats,
+            "message": f"LlamaIndex knowledge graph has {stats.get('total_nodes', 0)} nodes and {stats.get('total_edges', 0)} edges"
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Error getting LlamaIndex graph stats: {e}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+@app.post("/llamaindex-graph-search")
+async def llamaindex_graph_search(request: Request):
+    """Perform LlamaIndex GraphRAG search"""
+    logger.info("📥 LlamaIndex Graph search endpoint accessed")
+    
+    try:
+        data = await request.json()
+        query = data.get("query")
+        k = data.get("k", 5)
+        
+        if not query:
+            return {"error": "Query parameter is required"}
+        
+        if not GEMINI_API_KEY:
+            return {"error": "GEMINI_API_KEY not configured"}
+        
+        llamaindex_graphrag = get_llamaindex_graphrag_service(GEMINI_API_KEY)
+        results = llamaindex_graphrag.hybrid_search(query, k=k)
+        
+        return {
+            "success": True,
+            "query": query,
+            "results": results,
+            "count": len(results)
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Error in LlamaIndex graph search: {e}")
+        return {
+            "success": False,
             "error": str(e)
         }
 
