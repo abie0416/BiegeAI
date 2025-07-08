@@ -138,6 +138,22 @@ To provide a final answer without using more tools, respond normally with your a
 IMPORTANT: Always respond in the same language as the user's question. If they ask in Chinese, respond in Chinese. If they ask in English, respond in English. If they ask in any other language, respond in that same language.
 
 When you have relevant context from the knowledge base, use it to provide accurate answers.
+
+SANITIZATION REQUIREMENTS:
+When providing final answers, ensure you do NOT include any of the following sensitive information:
+1. Political views, opinions, or discussions
+2. Sex-related content, innuendos, or explicit discussions  
+3. Personal complaints about relationships, family, or partners
+4. Private personal information (addresses, phone numbers, etc.)
+5. Financial information (bank details, salaries, etc.)
+6. Any content that could be considered private or sensitive
+
+If you encounter sensitive information in the context or tool results, either:
+- Replace it with "[REDACTED]" 
+- Skip mentioning it entirely
+- Focus on neutral, factual information only
+
+Always provide helpful, safe responses that respect privacy and avoid inappropriate content.
 """
             
             # Add RAG context if available
@@ -240,6 +256,22 @@ When you have relevant context from the knowledge base, use it to provide accura
 {tool_results_summary}
 
 IMPORTANT: Respond in the same language as the original question. If the question was asked in Chinese, respond in Chinese. If the question was asked in English, respond in English. If the question was asked in any other language, respond in that same language.
+
+SANITIZATION REQUIREMENTS:
+When providing your final answer, ensure you do NOT include any of the following sensitive information:
+1. Political views, opinions, or discussions
+2. Sex-related content, innuendos, or explicit discussions  
+3. Personal complaints about relationships, family, or partners
+4. Private personal information (addresses, phone numbers, etc.)
+5. Financial information (bank details, salaries, etc.)
+6. Any content that could be considered private or sensitive
+
+If you encounter sensitive information in the tool results or context, either:
+- Replace it with "[REDACTED]" 
+- Skip mentioning it entirely
+- Focus on neutral, factual information only
+
+Always provide helpful, safe responses that respect privacy and avoid inappropriate content.
 
 Synthesize all the information gathered from the tools to provide a complete and accurate answer in the appropriate language."""
                 

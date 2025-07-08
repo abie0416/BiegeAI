@@ -419,6 +419,8 @@ function App() {
             >
               📊 Refresh Stats
             </button>
+            {/* Rebuild RAG button disabled - API still accessible at /rebuild-rag */}
+            {/* 
             <button 
               onClick={rebuildRag}
               disabled={rebuildLoading}
@@ -434,6 +436,7 @@ function App() {
             >
               {rebuildLoading ? "🔨 Rebuilding..." : "🔨 Rebuild GraphRAG"}
             </button>
+            */}
 
           </div>
           

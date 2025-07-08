@@ -15,6 +15,14 @@ class DocumentPreprocessor:
     def __init__(self, google_api_key: str):
         self.gemini_client = GeminiClient(google_api_key)
         
+        # Compile regex patterns once for better performance
+        self.meaningless_patterns = [
+            re.compile(r'^\s*(ok|yes|no|maybe|sure|fine|good|bad)\s*$', re.IGNORECASE),
+            re.compile(r'^\s*(haha|lol|lmao|rofl)\s*$', re.IGNORECASE),
+            re.compile(r'^\s*[😀-🙏🌀-🗿]+$', re.IGNORECASE),  # Emoji-only
+            re.compile(r'^\s*filter_out\s*$', re.IGNORECASE)
+        ]
+        
     def preprocess_documents(self, documents: List[Dict]) -> List[Dict]:
         """
         Preprocess documents to clean and summarize group chat history in parallel.
@@ -47,12 +55,23 @@ class DocumentPreprocessor:
                 return doc
         
         # Use ThreadPoolExecutor to parallelize processing and preserve order
+        # Adjust workers based on document count for optimal performance
+        num_workers = min(8, max(2, len(documents) // 2))  # Dynamic worker allocation
+        logger.info(f"🔧 Using {num_workers} workers for parallel processing")
+        
         preprocessed_docs = []
-        with ThreadPoolExecutor(max_workers=8) as executor:
+        total_docs = len(documents)
+        logger.info(f"📊 Starting parallel document processing: 0/{total_docs} (0%)")
+        
+        with ThreadPoolExecutor(max_workers=num_workers) as executor:
             results = list(executor.map(process_one, documents))
         preprocessed_docs = [r for r in results if r]
         
-        logger.info(f"✅ Document preprocessing completed: {len(preprocessed_docs)} documents processed")
+        total_processed = len(preprocessed_docs)
+        success_rate = (total_processed / total_docs) * 100 if total_docs > 0 else 0
+        
+        logger.info(f"✅ Document preprocessing completed: {total_processed}/{total_docs} documents processed ({success_rate:.1f}% success rate)")
+        
         return preprocessed_docs
     
     def _preprocess_single_document(self, content: str) -> str:
@@ -66,7 +85,7 @@ class DocumentPreprocessor:
             Preprocessed content
         """
         try:
-            # First, analyze the document structure
+            # Analyze the document structure
             analysis_prompt = self._create_analysis_prompt(content)
             analysis_response = self.gemini_client.generate(analysis_prompt)
             
@@ -77,12 +96,8 @@ class DocumentPreprocessor:
                 logger.warning("No conversation segments found, returning original content")
                 return content
             
-            # Process each segment
-            processed_segments = []
-            for segment in segments:
-                processed_segment = self._process_conversation_segment(segment)
-                if processed_segment:
-                    processed_segments.append(processed_segment)
+            # Process segments in parallel
+            processed_segments = self._process_segments_parallel(segments)
             
             if not processed_segments:
                 logger.warning("No valid segments after processing, returning original content")
@@ -96,6 +111,42 @@ class DocumentPreprocessor:
         except Exception as e:
             logger.error(f"❌ Error in single document preprocessing: {e}")
             return content
+    
+
+    
+    def _process_segments_parallel(self, segments: List[Dict]) -> List[str]:
+        """
+        Process conversation segments in parallel for better performance
+        
+        Args:
+            segments: List of segment dictionaries with content and metadata
+            
+        Returns:
+            List of processed segment content
+        """
+        def process_segment(segment):
+            try:
+                return self._process_conversation_segment(segment)
+            except Exception as e:
+                logger.error(f"❌ Error processing segment: {e}")
+                return None
+        
+        # Use ThreadPoolExecutor to parallelize segment processing
+        total_segments = len(segments)
+        logger.info(f"📊 Starting parallel segment processing: 0/{total_segments} (0%)")
+        
+        processed_segments = []
+        with ThreadPoolExecutor(max_workers=4) as executor:  # Lower workers for segment processing
+            results = list(executor.map(process_segment, segments))
+        
+        # Filter out None results
+        processed_segments = [result for result in results if result]
+        
+        processed_count = len(processed_segments)
+        success_rate = (processed_count / total_segments) * 100 if total_segments > 0 else 0
+        
+        logger.info(f"📊 Parallel segment processing completed: {processed_count}/{total_segments} segments processed successfully ({success_rate:.1f}% success rate)")
+        return processed_segments
     
     def _create_analysis_prompt(self, content: str) -> str:
         """Create prompt for analyzing document structure"""
@@ -133,83 +184,94 @@ Keep your response concise and focused on structure analysis.
         """
         segments = []
         
-        # Split by common conversation boundaries
-        # Look for patterns like timestamps, "replying to", or clear topic shifts
-        
         # Pattern 1: Split by timestamps (common in chat exports)
         timestamp_pattern = r'(\d{1,2}:\d{2}(?::\d{2})?\s*(?:AM|PM)?\s*\d{1,2}/\d{1,2}/\d{2,4})'
         timestamp_splits = re.split(timestamp_pattern, content)
         
         if len(timestamp_splits) > 1:
-            # Group timestamp with its content
-            for i in range(0, len(timestamp_splits) - 1, 2):
-                if i + 1 < len(timestamp_splits):
-                    timestamp = timestamp_splits[i].strip()
-                    segment_content = timestamp_splits[i + 1].strip()
-                    if segment_content:
-                        segments.append({
-                            'content': f"{timestamp}\n{segment_content}",
-                            'timestamp': timestamp,
-                            'type': 'timestamp_segment'
-                        })
+            # Use list comprehension for better performance
+            segments = [
+                {
+                    'content': f"{timestamp_splits[i].strip()}\n{timestamp_splits[i + 1].strip()}",
+                    'timestamp': timestamp_splits[i].strip(),
+                    'type': 'timestamp_segment'
+                }
+                for i in range(0, len(timestamp_splits) - 1, 2)
+                if timestamp_splits[i + 1].strip()
+            ]
         else:
             # Pattern 2: Split by "replying to" or similar indicators
             reply_pattern = r'(replying to|replied to|responding to|@\w+)'
             reply_splits = re.split(reply_pattern, content, flags=re.IGNORECASE)
             
             if len(reply_splits) > 1:
-                current_segment = ""
-                for i, part in enumerate(reply_splits):
-                    if i % 2 == 0:  # Content part
-                        current_segment += part
-                    else:  # Reply indicator part
-                        if current_segment.strip():
-                            segments.append({
-                                'content': current_segment.strip(),
-                                'reply_indicator': part,
-                                'type': 'reply_segment'
-                            })
-                        current_segment = part
-                
-                # Add the last segment
+                # Process reply splits more efficiently
+                segments = self._process_reply_splits(reply_splits)
+            else:
+                # Pattern 3: Split by large gaps or topic shifts
+                segments = self._process_line_segments(content)
+        
+        # If no segments found, treat the entire content as one segment
+        if not segments:
+            segments = [{
+                'content': content,
+                'type': 'single_segment'
+            }]
+        
+        logger.info(f"📊 Extracted {len(segments)} conversation segments")
+        return segments
+    
+    def _process_reply_splits(self, reply_splits: List[str]) -> List[Dict]:
+        """Process reply splits more efficiently"""
+        segments = []
+        current_segment = ""
+        
+        for i, part in enumerate(reply_splits):
+            if i % 2 == 0:  # Content part
+                current_segment += part
+            else:  # Reply indicator part
                 if current_segment.strip():
                     segments.append({
                         'content': current_segment.strip(),
-                        'type': 'final_segment'
+                        'reply_indicator': part,
+                        'type': 'reply_segment'
                     })
-            else:
-                # Pattern 3: Split by large gaps or topic shifts
-                # Look for multiple newlines or clear topic changes
-                lines = content.split('\n')
-                current_segment = []
-                
-                for line in lines:
-                    line = line.strip()
-                    if not line:
-                        if current_segment:
-                            segments.append({
-                                'content': '\n'.join(current_segment),
-                                'type': 'line_segment'
-                            })
-                            current_segment = []
-                    else:
-                        current_segment.append(line)
-                
-                # Add the last segment
+                current_segment = part
+        
+        # Add the last segment
+        if current_segment.strip():
+            segments.append({
+                'content': current_segment.strip(),
+                'type': 'final_segment'
+            })
+        
+        return segments
+    
+    def _process_line_segments(self, content: str) -> List[Dict]:
+        """Process line-based segments more efficiently"""
+        lines = content.split('\n')
+        segments = []
+        current_segment = []
+        
+        for line in lines:
+            line = line.strip()
+            if not line:
                 if current_segment:
                     segments.append({
                         'content': '\n'.join(current_segment),
                         'type': 'line_segment'
                     })
+                    current_segment = []
+            else:
+                current_segment.append(line)
         
-        # If no segments found, treat the entire content as one segment
-        if not segments:
+        # Add the last segment
+        if current_segment:
             segments.append({
-                'content': content,
-                'type': 'single_segment'
+                'content': '\n'.join(current_segment),
+                'type': 'line_segment'
             })
         
-        logger.info(f"📊 Extracted {len(segments)} conversation segments")
         return segments
     
     def _process_conversation_segment(self, segment: Dict) -> Optional[str]:
@@ -342,23 +404,14 @@ Respond with the cleaned and summarized content, or "FILTER_OUT" if the segment 
         if not content or content.strip() == "FILTER_OUT":
             return False
         
+        content_stripped = content.strip()
+        
         # Check for minimum meaningful length
-        if len(content.strip()) < 20:
+        if len(content_stripped) < 20:
             return False
         
-        # Check for common meaningless patterns
-        meaningless_patterns = [
-            r'^\s*(ok|yes|no|maybe|sure|fine|good|bad)\s*$',
-            r'^\s*(haha|lol|lmao|rofl)\s*$',
-            r'^\s*[😀-🙏🌀-🗿]+$',  # Emoji-only
-            r'^\s*filter_out\s*$'
-        ]
-        
-        for pattern in meaningless_patterns:
-            if re.match(pattern, content.strip(), re.IGNORECASE):
-                return False
-        
-        return True
+        # Use pre-compiled patterns for better performance
+        return not any(pattern.match(content_stripped) for pattern in self.meaningless_patterns)
     
     def _combine_segments(self, segments: List[str]) -> str:
         """

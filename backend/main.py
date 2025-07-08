@@ -287,6 +287,8 @@ async def ask(request: Request):
             method_used = "RAG_FALLBACK"
             logger.info("⚠️ Using RAG answer as fallback")
         
+
+        
         # Step 6: Store messages in conversation history
         conversation_manager.add_message(session_id, "user", question)
         conversation_manager.add_message(session_id, "agent", answer)
@@ -416,7 +418,7 @@ async def rebuild_rag():
 
         
         # Rebuild LlamaIndex GraphRAG
-        logger.info("🔨 Rebuilding LlamaIndex GraphRAG knowledge base...")
+        logger.info(f"🔨 Rebuilding LlamaIndex GraphRAG knowledge base with {total_documents} documents (0% complete)...")
         try:
             if not GEMINI_API_KEY:
                 logger.warning("⚠️ GEMINI_API_KEY not set, skipping LlamaIndex GraphRAG rebuild")
@@ -451,7 +453,7 @@ async def rebuild_rag():
                         "saved_locally": save_success,
                         "saved_to_gcp": gcp_bucket_name is not None and gcp_project_id is not None
                     }
-                    logger.info(f"✅ LlamaIndex GraphRAG rebuild completed successfully. {stats.get('total_nodes', 0)} nodes, {stats.get('total_edges', 0)} edges.")
+                    logger.info(f"✅ LlamaIndex GraphRAG rebuild completed successfully: {total_documents}/{total_documents} documents (100% complete). {stats.get('total_nodes', 0)} nodes, {stats.get('total_edges', 0)} edges.")
                     if gcp_bucket_name:
                         logger.info(f"📤 Index saved to GCP bucket: {gcp_bucket_name}")
                 else:

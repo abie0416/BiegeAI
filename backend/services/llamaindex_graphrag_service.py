@@ -40,10 +40,11 @@ logger = logging.getLogger(__name__)
 
 class LlamaIndexLLMWrapper(LLM):
     """Wrapper to make GeminiClient compatible with LlamaIndex LLM interface"""
-    gemini_client: Any  # Define as a field
     
     def __init__(self, gemini_client: GeminiClient):
-        super().__init__(gemini_client=gemini_client)
+        super().__init__()
+        # Use object.__setattr__ to bypass Pydantic validation
+        object.__setattr__(self, 'gemini_client', gemini_client)
     
     def complete(self, prompt: str, **kwargs):
         """Complete a prompt using the Gemini client"""
@@ -67,7 +68,7 @@ class LlamaIndexLLMWrapper(LLM):
     def chat(self, messages, **kwargs):
         """Chat completion"""
         # Convert messages to a single prompt
-        prompt = "\n".join([msg.content for msg in messages])
+        prompt = "\n".join([msg.content for msg in messages if msg.content])
         
         logger.info(f"💬 Sending chat messages to Gemini model:")
         logger.info(f"   - Number of messages: {len(messages)}")
@@ -93,7 +94,7 @@ class LlamaIndexLLMWrapper(LLM):
     
     def stream_chat(self, messages, **kwargs):
         """Stream chat completion"""
-        prompt = "\n".join([msg.content for msg in messages])
+        prompt = "\n".join([msg.content for msg in messages if msg.content])
         response = self.gemini_client.generate(prompt)
         yield type('Response', (), {'text': response})()
     
@@ -234,6 +235,9 @@ class LlamaIndexGraphRAGService:
             preprocessed_docs = self.document_preprocessor.preprocess_documents(documents)
             
             # Parallelize conversion to LlamaIndex Document objects
+            total_docs = len(preprocessed_docs)
+            logger.info(f"📊 Starting LlamaIndex document conversion: 0/{total_docs} (0%)")
+            
             def to_llama_doc(args):
                 i, doc = args
                 content = doc.get('content', '')
@@ -256,10 +260,15 @@ class LlamaIndexGraphRAGService:
                 llama_docs = list(executor.map(to_llama_doc, enumerate(preprocessed_docs)))
             llama_docs = [doc for doc in llama_docs if doc]
             
+            converted_count = len(llama_docs)
+            conversion_rate = (converted_count / total_docs) * 100 if total_docs > 0 else 0
+            logger.info(f"📊 LlamaIndex document conversion completed: {converted_count}/{total_docs} documents converted ({conversion_rate:.1f}% conversion rate)")
+            
             if not llama_docs:
                 raise Exception("No valid documents to process")
             
-            logger.info(f"📚 Processing {len(llama_docs)} documents...")
+            total_docs = len(llama_docs)
+            logger.info(f"📚 Starting knowledge graph construction: 0/{total_docs} documents (0%)")
             
             # Create knowledge graph index with entity extraction
             self.knowledge_graph_index = KnowledgeGraphIndex.from_documents(
@@ -270,12 +279,18 @@ class LlamaIndexGraphRAGService:
                 show_progress=True
             )
             
+            logger.info(f"📚 Knowledge graph construction completed: {total_docs}/{total_docs} documents processed (100%)")
+            
             # Create vector index for hybrid retrieval
+            logger.info(f"📚 Starting vector index construction: 0/{total_docs} documents (0%)")
+            
             self.vector_index = VectorStoreIndex.from_documents(
                 documents=llama_docs,
                 storage_context=self.storage_context,
                 show_progress=True
             )
+            
+            logger.info(f"📚 Vector index construction completed: {total_docs}/{total_docs} documents processed (100%)")
             
             # Create retriever from knowledge graph index
             self.retriever = self.knowledge_graph_index.as_retriever(
@@ -391,6 +406,11 @@ class LlamaIndexGraphRAGService:
             persist_dir = persist_dir or self.storage_path
             
             if os.path.exists(persist_dir):
+                # Ensure components are set up before loading
+                if not self.setup_components():
+                    logger.error("❌ Failed to setup components for loading index")
+                    return False
+                
                 self.storage_context = StorageContext.from_defaults(persist_dir=persist_dir)
                 
                 # Get available index IDs by reading the index store JSON file directly
@@ -443,14 +463,16 @@ class LlamaIndexGraphRAGService:
                 # Load the knowledge graph index
                 self.knowledge_graph_index = load_index_from_storage(
                     storage_context=self.storage_context,
-                    index_id=knowledge_graph_id
+                    index_id=knowledge_graph_id,
+                    llm=self.llm  # Explicitly pass our LLM
                 )
                 
                 # Load vector index if available
                 if vector_index_id:
                     self.vector_index = load_index_from_storage(
                         storage_context=self.storage_context,
-                        index_id=vector_index_id
+                        index_id=vector_index_id,
+                        llm=self.llm  # Explicitly pass our LLM
                     )
                 else:
                     # Create a new vector index if none exists
@@ -484,14 +506,9 @@ class LlamaIndexGraphRAGService:
         try:
             logger.info("🔄 Initializing RAG service from GCP...")
             
-            # Setup components first
-            if not self.setup_components():
-                logger.error("❌ Failed to setup components")
-                return False
-            
             # Try to download from GCP
             if self.download_from_gcp():
-                # Load the downloaded index
+                # Load the downloaded index (setup_components will be called inside load_index)
                 if self.load_index():
                     logger.info("✅ Successfully initialized RAG service from GCP")
                     return True
