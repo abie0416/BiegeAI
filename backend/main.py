@@ -108,30 +108,39 @@ def initialize_rag_knowledge_base():
             logger.warning("⚠️ GEMINI_API_KEY not set, skipping RAG initialization")
             return False
         
-        # Get documents from Google Sheets with fallback
-        documents = get_documents_from_sheets_with_fallback()
+        # Get GCP configuration from environment
+        gcp_bucket_name = os.getenv("GCP_BUCKET_NAME")
+        gcp_project_id = os.getenv("GCP_PROJECT_ID")
         
-        if not documents:
-            logger.warning("⚠️ No documents available for RAG initialization")
-            return False
-        
-        # Initialize LlamaIndex GraphRAG
-        success_llamaindex = False
-        
-        # Try LlamaIndex GraphRAG
+        # Initialize LlamaIndex GraphRAG with GCP support
         try:
-            llamaindex_graphrag = get_llamaindex_graphrag_service(GEMINI_API_KEY)
-            success_llamaindex = llamaindex_graphrag.build_knowledge_graph(documents)
-            if success_llamaindex:
-                logger.info("✅ LlamaIndex GraphRAG knowledge base initialized successfully")
+            llamaindex_graphrag = get_llamaindex_graphrag_service(
+                google_api_key=GEMINI_API_KEY,
+                gcp_bucket_name=gcp_bucket_name,
+                gcp_project_id=gcp_project_id
+            )
+            
+            # Try to initialize from GCP first
+            if gcp_bucket_name and gcp_project_id:
+                logger.info("🔄 Attempting to initialize RAG from GCP...")
+                if llamaindex_graphrag.initialize_from_gcp():
+                    logger.info("✅ RAG knowledge base initialized from GCP successfully")
+                    return True
+                else:
+                    logger.warning("⚠️ Failed to initialize from GCP, trying local storage...")
+            
+            # Try to load from local storage
+            if llamaindex_graphrag.load_index():
+                logger.info("✅ RAG knowledge base loaded from local storage")
+                return True
+            
+            # If no existing index found, don't rebuild automatically
+            logger.warning("⚠️ No existing RAG index found in GCP or local storage")
+            logger.info("💡 Use the /rebuild-rag endpoint to build the initial knowledge base")
+            return False
+                
         except Exception as e:
             logger.error(f"❌ LlamaIndex GraphRAG initialization failed: {e}")
-        
-        if success_llamaindex:
-            logger.info(f"✅ RAG knowledge base initialized with {len(documents)} documents")
-            return True
-        else:
-            logger.error("❌ Failed to initialize RAG knowledge base")
             return False
             
     except Exception as e:
@@ -342,7 +351,7 @@ async def debug_info():
         },
         "services": {
             "gemini_client": "Ready" if gemini_client else "Not ready",
-            "rag_knowledge_base": "Initialized" if rag_initialized else "Not initialized"
+            "rag_knowledge_base": "Initialized" if rag_initialized else "Not initialized - use /rebuild-rag to build"
         },
         "conversation_manager": {
             "total_sessions": len(conversation_manager.sessions),
@@ -413,13 +422,24 @@ async def rebuild_rag():
                 logger.warning("⚠️ GEMINI_API_KEY not set, skipping LlamaIndex GraphRAG rebuild")
                 results["llamaindex_graphrag"] = {"success": False, "nodes_created": 0, "edges_created": 0, "error": "GEMINI_API_KEY not configured"}
             else:
-                # Get LlamaIndex GraphRAG service
-                llamaindex_graphrag = get_llamaindex_graphrag_service(GEMINI_API_KEY)
+                # Get GCP configuration
+                gcp_bucket_name = os.getenv("GCP_BUCKET_NAME")
+                gcp_project_id = os.getenv("GCP_PROJECT_ID")
+                
+                # Get LlamaIndex GraphRAG service with GCP support
+                llamaindex_graphrag = get_llamaindex_graphrag_service(
+                    google_api_key=GEMINI_API_KEY,
+                    gcp_bucket_name=gcp_bucket_name,
+                    gcp_project_id=gcp_project_id
+                )
                 
                 # Build knowledge graph
                 success = llamaindex_graphrag.build_knowledge_graph(documents)
                 
                 if success:
+                    # Save to both local storage and GCP
+                    save_success = llamaindex_graphrag.save_index()
+                    
                     # Get graph statistics
                     stats = llamaindex_graphrag.get_graph_statistics()
                     results["llamaindex_graphrag"] = {
@@ -427,9 +447,13 @@ async def rebuild_rag():
                         "nodes_created": stats.get("total_nodes", 0),
                         "edges_created": stats.get("total_edges", 0),
                         "node_types": stats.get("node_types", {}),
-                        "relationship_types": stats.get("relationship_types", {})
+                        "relationship_types": stats.get("relationship_types", {}),
+                        "saved_locally": save_success,
+                        "saved_to_gcp": gcp_bucket_name is not None and gcp_project_id is not None
                     }
                     logger.info(f"✅ LlamaIndex GraphRAG rebuild completed successfully. {stats.get('total_nodes', 0)} nodes, {stats.get('total_edges', 0)} edges.")
+                    if gcp_bucket_name:
+                        logger.info(f"📤 Index saved to GCP bucket: {gcp_bucket_name}")
                 else:
                     results["llamaindex_graphrag"] = {"success": False, "nodes_created": 0, "edges_created": 0, "error": "LlamaIndex GraphRAG build process failed"}
                     

@@ -31,6 +31,8 @@ If Railway doesn't auto-detect the services:
 
 **Backend Service**:
 - `GEMINI_API_KEY`: Your Gemini API key
+- `GCP_PROJECT_ID`: Your Google Cloud Project ID (optional, for RAG persistence)
+- `GCP_BUCKET_NAME`: Your GCP Cloud Storage bucket name (optional, for RAG persistence)
 
 **Frontend Service**:
 - `VITE_BACKEND_URL`: URL of your backend service (e.g., `https://your-backend-service.railway.app`)
@@ -47,6 +49,50 @@ If you get "Nixpacks was unable to generate a build plan":
 1. Make sure you're deploying from the correct subdirectory
 2. Check that the root directory is set to `backend` or `frontend`
 3. Verify that `requirements.txt` (backend) or `package.json` (frontend) exists
+
+## GCP Cloud Storage Setup (Optional)
+
+For persistent RAG index storage across deployments:
+
+### 1. Install Google Cloud SDK
+
+```bash
+# Install gcloud CLI
+curl https://sdk.cloud.google.com | bash
+exec -l $SHELL
+gcloud init
+```
+
+### 2. Authenticate with GCP
+
+```bash
+gcloud auth application-default login
+```
+
+### 3. Setup GCP Storage
+
+```bash
+cd backend
+python setup_gcp.py
+```
+
+This will:
+- Create a GCP Cloud Storage bucket
+- Test upload/download functionality
+- Generate environment variables for Railway
+
+### 4. Add GCP Environment Variables to Railway
+
+In your Railway project dashboard, add:
+- `GCP_PROJECT_ID`: Your Google Cloud Project ID
+- `GCP_BUCKET_NAME`: Your GCP Cloud Storage bucket name
+
+### 5. Test GCP Connection
+
+```bash
+cd backend
+python setup_gcp.py test
+```
 
 ## Google Sheets Service Account Setup
 
@@ -71,7 +117,9 @@ In your Railway project dashboard:
 - `GOOGLE_SHEETS_SPREADSHEET_ID`: Your Google Sheets spreadsheet ID
 - `GOOGLE_SERVICE_ACCOUNT_JSON`: The entire contents of your service account JSON file
 
-#### Optional Variables:
+#### Optional Variables (for GCP RAG persistence):
+- `GCP_PROJECT_ID`: Your Google Cloud Project ID
+- `GCP_BUCKET_NAME`: Your GCP Cloud Storage bucket name
 - `PORT`: Railway will set this automatically
 - `RAILWAY_ENVIRONMENT`: Railway will set this automatically
 
@@ -96,10 +144,27 @@ In your Railway project dashboard:
 
 Once all environment variables are set, deploy your application. The service will:
 
-1. Automatically initialize the RAG knowledge base on startup
-2. Fetch documents from Google Sheets
-3. Build the advanced RAG index with AI metadata
-4. Be ready to handle queries immediately
+1. **If GCP is configured**: Try to download existing RAG index from GCP
+2. **If no GCP or no existing index**: Automatically initialize the RAG knowledge base on startup
+3. Fetch documents from Google Sheets
+4. Build the advanced RAG index with AI metadata
+5. **If GCP is configured**: Save the index to both local storage and GCP
+6. Be ready to handle queries immediately
+
+### 6. Rebuild RAG Index
+
+To rebuild the RAG index with latest data:
+
+```bash
+# Via API endpoint
+curl -X POST https://your-backend.railway.app/rebuild-rag
+```
+
+This will:
+- Fetch latest documents from Google Sheets
+- Rebuild the RAG index using AI processing
+- Save to local storage
+- Upload to GCP Cloud Storage (if configured)
 
 ### Troubleshooting
 
@@ -107,7 +172,24 @@ Once all environment variables are set, deploy your application. The service wil
 - **"Invalid JSON"**: Check that the entire JSON content was copied correctly
 - **"Permission denied"**: Ensure the service account email has access to the Google Sheet
 - **"Spreadsheet not found"**: Verify the `GOOGLE_SHEETS_SPREADSHEET_ID` is correct
+- **"GCP connection failed"**: Check your GCP credentials and bucket permissions
+- **"RAG index not found"**: Use the `/rebuild-rag` endpoint to build the initial index
 
 ### Local Development
 
-For local development, you can still use the `google_sheets_service_account.json` file. The code will automatically use the environment variable if available, or fall back to the file if it exists. 
+For local development, you can still use the `google_sheets_service_account.json` file. The code will automatically use the environment variable if available, or fall back to the file if it exists.
+
+### RAG Index Persistence Strategy
+
+The application now supports multiple persistence strategies:
+
+1. **Local Storage Only** (default): Index saved to `./graphrag_storage/`
+2. **GCP Cloud Storage**: Index uploaded to GCP bucket for cross-deployment persistence
+3. **Hybrid**: Both local and GCP storage for maximum reliability
+
+**Benefits of GCP Storage:**
+- ✅ No rebuilding on Railway deployments
+- ✅ Fast startup times
+- ✅ Shared across multiple instances
+- ✅ Cost-effective (~$0.023/GB/month)
+- ✅ Reliable and scalable 

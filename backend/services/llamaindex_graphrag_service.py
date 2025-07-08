@@ -1,10 +1,12 @@
 """
 LlamaIndex GraphRAG service using optimized graph-based retrieval
-Updated for Railway deployment
+Updated for Railway deployment with GCP Cloud Storage persistence
 """
 import logging
 import os
 import traceback
+import tempfile
+import shutil
 from typing import List, Dict, Optional, Any
 from llama_index.core import (
     VectorStoreIndex, 
@@ -23,6 +25,15 @@ from llama_index.core.llms import LLM
 from agent.gemini_client import GeminiClient
 from services.document_preprocessor import DocumentPreprocessor
 from concurrent.futures import ThreadPoolExecutor
+
+# GCP Cloud Storage imports
+try:
+    from google.cloud import storage
+    from google.cloud.exceptions import NotFound
+    GCP_AVAILABLE = True
+except ImportError:
+    GCP_AVAILABLE = False
+    logging.warning("Google Cloud Storage not available. Install google-cloud-storage for GCP integration.")
 
 # Get logger for this module
 logger = logging.getLogger(__name__)
@@ -123,8 +134,11 @@ class LlamaIndexLLMWrapper(LLM):
         return True
 
 class LlamaIndexGraphRAGService:
-    def __init__(self, google_api_key: str):
+    def __init__(self, google_api_key: str, gcp_bucket_name: str = None, gcp_project_id: str = None):
         self.google_api_key = google_api_key
+        self.gcp_bucket_name = gcp_bucket_name
+        self.gcp_project_id = gcp_project_id
+        self.storage_path = "./graphrag_storage"
         self.llm = None
         self.embed_model = None
         self.graph_store = None
@@ -134,6 +148,39 @@ class LlamaIndexGraphRAGService:
         self.query_engine = None
         self.storage_context = None
         self.document_preprocessor = DocumentPreprocessor(google_api_key)
+        
+        # Ensure storage directory exists
+        os.makedirs(self.storage_path, exist_ok=True)
+        
+        # Initialize GCP client if available
+        self.gcp_client = None
+        if GCP_AVAILABLE and gcp_bucket_name:
+            try:
+                # Check if we have service account JSON in environment
+                service_account_json = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")
+                if service_account_json:
+                    # Create temporary credentials file from environment variable
+                    import tempfile
+                    import json
+                    
+                    # Parse the JSON to validate it
+                    service_account_data = json.loads(service_account_json)
+                    
+                    # Create temporary file with credentials
+                    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+                        json.dump(service_account_data, f)
+                        temp_credentials_path = f.name
+                    
+                    # Set environment variable for Google Cloud client
+                    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = temp_credentials_path
+                    
+                    self.gcp_client = storage.Client(project=gcp_project_id)
+                    logger.info(f"✅ GCP Cloud Storage client initialized for bucket: {gcp_bucket_name}")
+                else:
+                    logger.warning("⚠️ GOOGLE_SERVICE_ACCOUNT_JSON not found in environment variables")
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to initialize GCP client: {e}")
+                self.gcp_client = None
         
     def setup_components(self):
         """Setup LlamaIndex GraphRAG components"""
@@ -248,12 +295,20 @@ class LlamaIndexGraphRAGService:
             logger.error(f"❌ Error building LlamaIndex knowledge graph: {e}")
             return False
     
-    def save_index(self, persist_dir: str = "./graphrag_storage"):
-        """Save the index to disk"""
+    def save_index(self, persist_dir: str = None):
+        """Save the index to disk and optionally upload to GCP"""
         try:
+            persist_dir = persist_dir or self.storage_path
+            
             if self.storage_context:
+                # Save locally
                 self.storage_context.persist(persist_dir=persist_dir)
-                logger.info(f"✅ Index saved to {persist_dir}")
+                logger.info(f"✅ Index saved locally to {persist_dir}")
+                
+                # Upload to GCP if configured
+                if self.gcp_client and self.gcp_bucket_name:
+                    self._upload_to_gcp(persist_dir)
+                
                 return True
             else:
                 logger.warning("⚠️ No storage context to save")
@@ -262,19 +317,148 @@ class LlamaIndexGraphRAGService:
             logger.error(f"❌ Error saving index: {e}")
             return False
     
-    def load_index(self, persist_dir: str = "./graphrag_storage"):
-        """Load the index from disk"""
+    def _upload_to_gcp(self, local_path: str):
+        """Upload RAG index files to GCP Cloud Storage"""
         try:
+            bucket = self.gcp_client.bucket(self.gcp_bucket_name)
+            
+            # Upload all files in the directory
+            for root, dirs, files in os.walk(local_path):
+                for file in files:
+                    local_file_path = os.path.join(root, file)
+                    # Create GCP blob path relative to local_path
+                    relative_path = os.path.relpath(local_file_path, local_path)
+                    blob_path = f"rag_index/{relative_path}"
+                    
+                    blob = bucket.blob(blob_path)
+                    blob.upload_from_filename(local_file_path)
+                    logger.info(f"📤 Uploaded to GCP: {blob_path}")
+            
+            logger.info(f"✅ Successfully uploaded RAG index to GCP bucket: {self.gcp_bucket_name}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Error uploading to GCP: {e}")
+            return False
+    
+    def download_from_gcp(self) -> bool:
+        """Download RAG index from GCP Cloud Storage to local storage"""
+        try:
+            if not self.gcp_client or not self.gcp_bucket_name:
+                logger.warning("⚠️ GCP client not configured, skipping download")
+                return False
+            
+            bucket = self.gcp_client.bucket(self.gcp_bucket_name)
+            
+            # List all blobs with rag_index/ prefix
+            blobs = bucket.list_blobs(prefix="rag_index/")
+            
+            files_downloaded = 0
+            for blob in blobs:
+                # Skip if it's a directory marker
+                if blob.name.endswith('/'):
+                    continue
+                
+                # Create local file path
+                relative_path = blob.name.replace("rag_index/", "")
+                local_file_path = os.path.join(self.storage_path, relative_path)
+                
+                # Create directory if needed
+                os.makedirs(os.path.dirname(local_file_path), exist_ok=True)
+                
+                # Download file
+                blob.download_to_filename(local_file_path)
+                files_downloaded += 1
+                logger.info(f"📥 Downloaded from GCP: {blob.name} -> {local_file_path}")
+            
+            if files_downloaded > 0:
+                logger.info(f"✅ Successfully downloaded {files_downloaded} files from GCP")
+                return True
+            else:
+                logger.warning("⚠️ No files found in GCP bucket")
+                return False
+                
+        except Exception as e:
+            logger.error(f"❌ Error downloading from GCP: {e}")
+            return False
+    
+    def load_index(self, persist_dir: str = None):
+        """Load the index from disk"""
+        import json
+        import os
+        
+        try:
+            persist_dir = persist_dir or self.storage_path
+            
             if os.path.exists(persist_dir):
                 self.storage_context = StorageContext.from_defaults(persist_dir=persist_dir)
+                
+                # Get available index IDs by reading the index store JSON file directly
+                try:
+                    
+                    # Read the index store JSON file directly
+                    index_store_path = os.path.join(persist_dir, "index_store.json")
+                    if os.path.exists(index_store_path):
+                        with open(index_store_path, 'r') as f:
+                            index_store_data = json.load(f)
+                        
+                        logger.info(f"📋 Available index store keys: {list(index_store_data.keys())}")
+                        
+                        # Find knowledge graph index (look for one with type 'kg')
+                        knowledge_graph_id = None
+                        vector_index_id = None
+                        
+                        # The data is nested under 'index_store/data'
+                        if 'index_store/data' in index_store_data:
+                            data_dict = index_store_data['index_store/data']
+                            logger.info(f"📋 Index data keys: {list(data_dict.keys())}")
+                            
+                            for key, value in data_dict.items():
+                                if isinstance(value, dict) and value.get('__type__') == 'kg':
+                                    knowledge_graph_id = key
+                                    logger.info(f"🔍 Found knowledge graph index with ID: {knowledge_graph_id}")
+                                elif isinstance(value, dict) and value.get('__type__') == 'vector_store':
+                                    vector_index_id = key
+                                    logger.info(f"🔍 Found vector index with ID: {vector_index_id}")
+                        
+                        if not knowledge_graph_id:
+                            logger.warning("⚠️ No knowledge graph index found in storage")
+                            return False
+                            
+                        if not vector_index_id:
+                            logger.warning("⚠️ No vector index found in storage")
+                            return False
+                    else:
+                        logger.warning(f"⚠️ Index store file not found: {index_store_path}")
+                        return False
+                            
+                except Exception as e:
+                    logger.error(f"❌ Error getting index IDs: {e}")
+                    return False
+                
+                if not knowledge_graph_id:
+                    logger.error("❌ No knowledge graph index found")
+                    return False
+                
+                # Load the knowledge graph index
                 self.knowledge_graph_index = load_index_from_storage(
                     storage_context=self.storage_context,
-                    index_id="knowledge_graph"
+                    index_id=knowledge_graph_id
                 )
-                self.vector_index = load_index_from_storage(
-                    storage_context=self.storage_context,
-                    index_id="vector_store"
-                )
+                
+                # Load vector index if available
+                if vector_index_id:
+                    self.vector_index = load_index_from_storage(
+                        storage_context=self.storage_context,
+                        index_id=vector_index_id
+                    )
+                else:
+                    # Create a new vector index if none exists
+                    logger.info("📝 Creating new vector index...")
+                    self.vector_index = VectorStoreIndex.from_documents(
+                        documents=[],  # Empty for now, will be populated when needed
+                        storage_context=self.storage_context
+                    )
                 
                 # Recreate retriever and query engine
                 self.retriever = self.knowledge_graph_index.as_retriever(
@@ -293,6 +477,33 @@ class LlamaIndexGraphRAGService:
                 return False
         except Exception as e:
             logger.error(f"❌ Error loading index: {e}")
+            return False
+    
+    def initialize_from_gcp(self) -> bool:
+        """Initialize the service by downloading index from GCP and loading it"""
+        try:
+            logger.info("🔄 Initializing RAG service from GCP...")
+            
+            # Setup components first
+            if not self.setup_components():
+                logger.error("❌ Failed to setup components")
+                return False
+            
+            # Try to download from GCP
+            if self.download_from_gcp():
+                # Load the downloaded index
+                if self.load_index():
+                    logger.info("✅ Successfully initialized RAG service from GCP")
+                    return True
+                else:
+                    logger.warning("⚠️ Downloaded from GCP but failed to load index")
+                    return False
+            else:
+                logger.warning("⚠️ No index found in GCP, service will need to be built")
+                return False
+                
+        except Exception as e:
+            logger.error(f"❌ Error initializing from GCP: {e}")
             return False
     
     def hybrid_search(self, query: str, k: int = 5) -> List[Dict]:
@@ -450,9 +661,13 @@ class LlamaIndexGraphRAGService:
 # Global instance
 llamaindex_graphrag_service = None
 
-def get_llamaindex_graphrag_service(google_api_key: str) -> LlamaIndexGraphRAGService:
+def get_llamaindex_graphrag_service(google_api_key: str, gcp_bucket_name: str = None, gcp_project_id: str = None) -> LlamaIndexGraphRAGService:
     """Get or create LlamaIndex GraphRAG service instance"""
     global llamaindex_graphrag_service
     if llamaindex_graphrag_service is None:
-        llamaindex_graphrag_service = LlamaIndexGraphRAGService(google_api_key)
+        llamaindex_graphrag_service = LlamaIndexGraphRAGService(
+            google_api_key=google_api_key,
+            gcp_bucket_name=gcp_bucket_name,
+            gcp_project_id=gcp_project_id
+        )
     return llamaindex_graphrag_service 
