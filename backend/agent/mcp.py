@@ -158,7 +158,7 @@ Always provide helpful, safe responses that respect privacy and avoid inappropri
             
             # Add RAG context if available
             if rag_context:
-                system_prompt += f"\n\nRelevant context from knowledge base:\n{rag_context}\n\nUse this context when relevant to the question."
+                system_prompt += f"\n\nRelevant context from knowledge base:\n{rag_context}\n\nUse this context along with general knowledge when relevant to the question."
             
             # Multi-tool execution loop
             max_tool_calls = 5  # Prevent infinite loops
